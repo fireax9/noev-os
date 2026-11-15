@@ -1,0 +1,584 @@
+package com.example.ui.cordly
+
+import android.util.Log
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.data.model.Conversation
+import com.example.data.model.DirectMessage
+import com.example.data.model.Friendship
+import com.example.data.model.LookupKey
+import com.example.data.model.PublicProfile
+import com.example.data.model.Server
+import com.example.data.model.ServerMessage
+import com.example.data.model.UserPrivate
+import com.example.data.repository.CordlyRepository
+import com.google.firebase.Firebase
+import com.google.firebase.auth.auth
+import com.google.firebase.firestore.FirebaseFirestoreException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+sealed interface UiState<out T> {
+    data object Loading : UiState<Nothing>
+    data class Success<T>(val data: T) : UiState<T>
+    data class Error(val message: String) : UiState<Nothing>
+}
+
+sealed interface ActiveDestination {
+    data object Home : ActiveDestination
+    data class ServerSpace(val serverId: String, val channelName: String) : ActiveDestination
+}
+
+sealed interface ActiveChatTarget {
+    data class DirectChat(val conversationId: String) : ActiveChatTarget
+    data class ServerChannel(val serverId: String, val channelName: String) : ActiveChatTarget
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class CordlyViewModel(
+    private val repository: CordlyRepository,
+    val currentUserId: String
+) : ViewModel() {
+
+    private val _destination = MutableStateFlow<ActiveDestination>(ActiveDestination.Home)
+    val destination: StateFlow<ActiveDestination> = _destination.asStateFlow()
+
+    private val _activeChat = MutableStateFlow<ActiveChatTarget?>(null)
+    val activeChat: StateFlow<ActiveChatTarget?> = _activeChat.asStateFlow()
+
+    private val _homeTab = MutableStateFlow(0) // 0 = Messages, 1 = Friends
+    val homeTab: StateFlow<Int> = _homeTab.asStateFlow()
+
+    private val _snackbarMessage = MutableStateFlow<String?>(null)
+    val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
+
+    private val _friendSearchState = MutableStateFlow<UiState<LookupKey?>?>(null)
+    val friendSearchState: StateFlow<UiState<LookupKey?>?> = _friendSearchState.asStateFlow()
+
+    private val _isBusy = MutableStateFlow(false)
+    val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
+
+    data class ProfileViewerTarget(
+        val userId: String,
+        val fallbackName: String,
+        val fallbackPhoto: String?,
+        val onMessageClick: (() -> Unit)? = null
+    )
+
+    private val _profileViewerTarget = MutableStateFlow<ProfileViewerTarget?>(null)
+    val profileViewerTarget: StateFlow<ProfileViewerTarget?> = _profileViewerTarget.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            val firebaseUser = Firebase.auth.currentUser
+            if (firebaseUser != null && firebaseUser.uid == currentUserId) {
+                repository.ensureUserProfile(firebaseUser)
+                    .onFailure { err ->
+                        Log.w(TAG, "Profile bootstrap failed", err)
+                        _snackbarMessage.value = err.localizedMessage ?: "Failed to initialize profile"
+                    }
+            }
+        }
+    }
+
+    val ownProfile: StateFlow<UiState<UserPrivate?>> = repository.observeOwnProfile(currentUserId)
+        .map<UserPrivate?, UiState<UserPrivate?>> { UiState.Success(it) }
+        .catch { error ->
+            emit(UiState.Error(unwrapError(error, "Failed to load profile")))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val friendships: StateFlow<UiState<List<Friendship>>> = repository.observeFriendships(currentUserId)
+        .map<List<Friendship>, UiState<List<Friendship>>> { UiState.Success(it) }
+        .catch { error ->
+            emit(UiState.Error(unwrapError(error, "Failed to load friends")))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val conversations: StateFlow<UiState<List<Conversation>>> = repository.observeConversations(currentUserId)
+        .map<List<Conversation>, UiState<List<Conversation>>> { UiState.Success(it) }
+        .catch { error ->
+            emit(UiState.Error(unwrapError(error, "Failed to load direct messages")))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val servers: StateFlow<UiState<List<Server>>> = repository.observeServers(currentUserId)
+        .map<List<Server>, UiState<List<Server>>> { UiState.Success(it) }
+        .catch { error ->
+            emit(UiState.Error(unwrapError(error, "Failed to load servers")))
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val directMessages: StateFlow<UiState<List<DirectMessage>>> = _activeChat
+        .flatMapLatest { target ->
+            if (target is ActiveChatTarget.DirectChat) {
+                repository.observeDirectMessages(target.conversationId, currentUserId)
+                    .map<List<DirectMessage>, UiState<List<DirectMessage>>> { UiState.Success(it) }
+                    .catch { error ->
+                        emit(UiState.Error(unwrapError(error, "Failed to load messages")))
+                    }
+            } else {
+                flowOf(UiState.Success(emptyList()))
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val serverMessages: StateFlow<UiState<List<ServerMessage>>> = _activeChat
+        .flatMapLatest { target ->
+            if (target is ActiveChatTarget.ServerChannel) {
+                repository.observeServerMessages(target.serverId, currentUserId)
+                    .map<List<ServerMessage>, UiState<List<ServerMessage>>> { list ->
+                        UiState.Success(list.filter { it.channelName == target.channelName })
+                    }
+                    .catch { error ->
+                        emit(UiState.Error(unwrapError(error, "Failed to load channel messages")))
+                    }
+            } else {
+                flowOf(UiState.Success(emptyList()))
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val viewedPublicProfile: StateFlow<UiState<PublicProfile?>?> = _profileViewerTarget
+        .flatMapLatest { target ->
+            if (target == null) {
+                flowOf(null)
+            } else {
+                repository.observePublicProfile(target.userId)
+                    .map<PublicProfile?, UiState<PublicProfile?>> { UiState.Success(it) }
+                    .catch { error ->
+                        emit(UiState.Error(unwrapError(error, "Failed to load user profile")))
+                    }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+
+    fun selectHome(tabIndex: Int? = null) {
+        _destination.value = ActiveDestination.Home
+        if (tabIndex != null) {
+            _homeTab.value = tabIndex
+        }
+        _activeChat.value = null
+    }
+
+    fun setHomeTab(tabIndex: Int) {
+        _homeTab.value = tabIndex
+    }
+
+    fun selectServer(server: Server) {
+        val defaultChannel = server.channels.firstOrNull() ?: "general"
+        _destination.value = ActiveDestination.ServerSpace(server.id, defaultChannel)
+        _activeChat.value = null
+    }
+
+    fun openServerChannel(serverId: String, channelName: String) {
+        _destination.value = ActiveDestination.ServerSpace(serverId, channelName)
+        _activeChat.value = ActiveChatTarget.ServerChannel(serverId, channelName)
+    }
+
+    fun openDirectChat(conversationId: String) {
+        _activeChat.value = ActiveChatTarget.DirectChat(conversationId)
+    }
+
+    fun closeActiveChat() {
+        _activeChat.value = null
+    }
+
+    fun clearSnackbar() {
+        _snackbarMessage.value = null
+    }
+
+    fun showMessage(message: String) {
+        _snackbarMessage.value = message
+    }
+
+    fun clearFriendSearch() {
+        _friendSearchState.value = null
+    }
+
+    fun searchFriend(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            _friendSearchState.value = UiState.Error("Enter a Gmail address or neov chat Friend Code.")
+            return
+        }
+        _friendSearchState.value = UiState.Loading
+        viewModelScope.launch {
+            repository.findUserByEmailOrCode(trimmed)
+                .onSuccess { lookup ->
+                    if (lookup == null) {
+                        _friendSearchState.value = UiState.Error("No neov chat user found for \"$trimmed\". Ask them to sign in once first.")
+                    } else if (lookup.userId == currentUserId) {
+                        _friendSearchState.value = UiState.Error("That's your own account!")
+                    } else {
+                        _friendSearchState.value = UiState.Success(lookup)
+                    }
+                }
+                .onFailure { err ->
+                    _friendSearchState.value = UiState.Error(err.localizedMessage ?: "Lookup failed.")
+                }
+        }
+    }
+
+    fun sendFriendRequest(target: LookupKey, onDone: () -> Unit) {
+        val profile = (ownProfile.value as? UiState.Success)?.data
+        if (profile == null) {
+            _snackbarMessage.value = "Profile still loading, try again."
+            return
+        }
+        _isBusy.value = true
+        viewModelScope.launch {
+            val alreadyRewarded = profile.rewardedFriendUids.contains(target.userId)
+            repository.sendFriendRequest(profile, target)
+                .onSuccess {
+                    _snackbarMessage.value = if (!alreadyRewarded) {
+                        "Friend request sent to ${target.displayName} (+200 P E Y)"
+                    } else {
+                        "Friend request sent to ${target.displayName}"
+                    }
+                    _friendSearchState.value = null
+                    onDone()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not send friend request."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun acceptFriendRequest(friendship: Friendship) {
+        val profile = (ownProfile.value as? UiState.Success)?.data
+        val friendUid = if (friendship.requesterId == currentUserId) friendship.recipientId else friendship.requesterId
+        val alreadyRewarded = profile?.rewardedFriendUids?.contains(friendUid) == true
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.acceptFriendRequest(friendship)
+                .onSuccess { convId ->
+                    _snackbarMessage.value = if (!alreadyRewarded) {
+                        "You are now friends! +200 P E Y earned!"
+                    } else {
+                        "You are now friends! Chat unlocked."
+                    }
+                    _activeChat.value = ActiveChatTarget.DirectChat(convId)
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to accept request."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun removeFriendship(friendshipId: String) {
+        viewModelScope.launch {
+            repository.removeFriendship(friendshipId)
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to update friendship."
+                }
+        }
+    }
+
+    fun startChatWithFriend(friendship: Friendship) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        val friendId = if (friendship.requesterId == currentUserId) friendship.recipientId else friendship.requesterId
+        val friendName = if (friendship.requesterId == currentUserId) friendship.recipientName else friendship.requesterName
+        val friendPhoto = if (friendship.requesterId == currentUserId) friendship.recipientPhoto else friendship.requesterPhoto
+
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.getOrCreateConversation(profile, friendId, friendName, friendPhoto)
+                .onSuccess { convId ->
+                    _activeChat.value = ActiveChatTarget.DirectChat(convId)
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not open chat."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun sendDirectMessage(conversation: Conversation, text: String, replyToText: String? = null) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        viewModelScope.launch {
+            repository.sendDirectMessage(conversation, profile, text, replyToText)
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to send message."
+                }
+        }
+    }
+
+    fun deleteDirectMessage(conversationId: String, messageId: String) {
+        viewModelScope.launch {
+            repository.deleteDirectMessage(conversationId, messageId)
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to delete message."
+                }
+        }
+    }
+
+    fun createServer(
+        name: String,
+        description: String?,
+        iconEmoji: String,
+        accentHex: String,
+        iconUrl: String? = null,
+        onCreated: () -> Unit
+    ) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.createServer(name, description, iconEmoji, accentHex, iconUrl)
+                .onSuccess { server ->
+                    _destination.value = ActiveDestination.ServerSpace(server.id, server.channels.firstOrNull() ?: "general")
+                    _activeChat.value = null
+                    _snackbarMessage.value = "Server '${server.name}' created! Friends can join by name."
+                    onCreated()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to create server."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun updateServerIcon(server: Server, newIconUrl: String?, newEmoji: String? = null) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.updateServerIcon(server, newIconUrl, newEmoji)
+                .onSuccess {
+                    _snackbarMessage.value = "Server icon updated!"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not update server icon."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun joinServerByInvite(codeOrName: String, onJoined: () -> Unit) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.joinServerByInvite(codeOrName)
+                .onSuccess { server ->
+                    _destination.value = ActiveDestination.ServerSpace(server.id, server.channels.firstOrNull() ?: "general")
+                    _activeChat.value = null
+                    _snackbarMessage.value = "Joined ${server.name}!"
+                    onJoined()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not join server."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun addChannel(server: Server, channelName: String, onAdded: () -> Unit) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.addChannelToServer(server, channelName)
+                .onSuccess {
+                    _snackbarMessage.value = "Channel created!"
+                    onAdded()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not add channel."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun leaveServer(serverId: String) {
+        viewModelScope.launch {
+            repository.leaveServer(serverId)
+                .onSuccess {
+                    selectHome()
+                    _snackbarMessage.value = "Left server."
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not leave server."
+                }
+        }
+    }
+
+    fun sendServerMessage(server: Server, channelName: String, text: String, replyToText: String? = null) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        viewModelScope.launch {
+            repository.sendServerMessage(server, channelName, profile, text, replyToText)
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to send message."
+                }
+        }
+    }
+
+    fun deleteServerMessage(serverId: String, messageId: String) {
+        viewModelScope.launch {
+            repository.deleteServerMessage(serverId, messageId)
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to delete message."
+                }
+        }
+    }
+
+    fun updateStatus(
+        status: String,
+        customStatus: String?,
+        displayName: String?,
+        photoUrl: String? = null,
+        bannerUrl: String? = null,
+        clearBanner: Boolean = false,
+        onSaved: () -> Unit
+    ) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.updateProfileStatus(status, customStatus, displayName, photoUrl, bannerUrl, clearBanner)
+                .onSuccess {
+                    _snackbarMessage.value = "Profile saved"
+                    onSaved()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to update profile."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun updateProfileMedia(
+        photoUrl: String? = null,
+        bannerUrl: String? = null,
+        clearBanner: Boolean = false,
+        label: String = "Profile image"
+    ) {
+        val current = (ownProfile.value as? UiState.Success)?.data
+        val status = current?.status ?: "online"
+        val customStatus = current?.customStatus
+        val displayName = current?.displayName
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.updateProfileStatus(
+                status = status,
+                customStatus = customStatus,
+                displayName = displayName,
+                photoUrl = photoUrl,
+                bannerUrl = bannerUrl,
+                clearBanner = clearBanner
+            )
+                .onSuccess {
+                    _snackbarMessage.value = "$label updated!"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to update $label."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun purchaseAndEquipFrame(frame: ProfileFrameItem) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.purchaseAndEquipFrame(frame.id, frame.price)
+                .onSuccess { remaining ->
+                    _snackbarMessage.value = "Equipped ${frame.title}! ($remaining P E Y left)"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Purchase failed."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun equipFrame(frameId: String) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.equipFrame(frameId)
+                .onSuccess {
+                    val item = PeyShopCatalog.findById(frameId)
+                    _snackbarMessage.value = "Frame equipped: ${item.title}"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not equip frame."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun purchaseAndEquipProfileEffect(
+        effect: ProfileVideoEffectItem,
+        videoDataUri: String? = null,
+        localOnlyNotice: Boolean = false
+    ) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.purchaseAndEquipProfileEffect(effect.id, effect.price, videoDataUri)
+                .onSuccess { remaining ->
+                    val syncSuffix = if (localOnlyNotice) " (saved locally; large video skipped cloud sync)" else ""
+                    _snackbarMessage.value = "Equipped 5s video: ${effect.title}! ($remaining P E Y left)$syncSuffix"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Purchase failed."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun equipProfileEffect(
+        effectId: String,
+        videoDataUri: String? = null,
+        localOnlyNotice: Boolean = false
+    ) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.equipProfileEffect(effectId, videoDataUri)
+                .onSuccess {
+                    val item = PeyShopCatalog.findEffectById(effectId)
+                    val syncSuffix = if (localOnlyNotice) " (saved locally; lighter <500KB clips sync to friends)" else ""
+                    _snackbarMessage.value = "Equipped 5s intro: ${item.title}$syncSuffix"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not equip 5s video effect."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun openProfileViewer(
+        userId: String,
+        fallbackName: String,
+        fallbackPhoto: String?,
+        onMessageClick: (() -> Unit)? = null
+    ) {
+        if (userId.isBlank()) return
+        _profileViewerTarget.value = ProfileViewerTarget(
+            userId = userId,
+            fallbackName = fallbackName,
+            fallbackPhoto = fallbackPhoto,
+            onMessageClick = onMessageClick
+        )
+    }
+
+    fun closeProfileViewer() {
+        _profileViewerTarget.value = null
+    }
+
+    private fun unwrapError(error: Throwable, fallback: String): String {
+        val firestoreError = generateSequence(error) { it.cause }
+            .filterIsInstance<FirebaseFirestoreException>()
+            .firstOrNull()
+        if (firestoreError == null && error is CancellationException) throw error
+        val root = firestoreError ?: error
+        Log.w(TAG, fallback, root)
+        return root.message ?: fallback
+    }
+
+    private companion object {
+        const val TAG = "NeovVM"
+        const val STOP_TIMEOUT_MS = 5000L
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "neov chat",
+  "description": "neov chat is a real-time Discord-style gaming & community chat app with Google Sign-In, custom themes, profile banners, P E Y rewards, and avatar frame shop.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

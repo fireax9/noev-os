@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">neov chat</string>
+    <string name="sign_in_with_google">تسجيل الدخول عبر Google</string>
+    <string name="cordly_tagline">تواصل مع أصدقائك، أنشئ سيرفرات وقنوات، وتحدث فورياً عبر حسابك في Gmail.</string>
+    <string name="direct_messages">الرسائل المباشرة</string>
+    <string name="friends">الأصدقاء</string>
+    <string name="add_friend">إضافة صديق</string>
+    <string name="create_server">إنشاء سيرفر</string>
+    <string name="join_server">الانضمام لسيرفر</string>
+    <string name="sign_out">تسجيل الخروج</string>
+</resources>

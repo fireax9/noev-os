@@ -1,0 +1,229 @@
+{
+  "entities": {
+    "UserPrivate": {
+      "title": "UserPrivate",
+      "description": "Private user account profile containing Gmail address PII, isolated to owner.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "description": "User Gmail address" },
+        "displayName": { "type": "string", "description": "Display name" },
+        "friendCode": { "type": "string", "description": "Shareable neov chat friend code" },
+        "status": { "type": "string", "enum": ["online", "idle", "dnd", "offline"], "description": "Presence status" },
+        "photoUrl": { "type": "string", "description": "Profile avatar URL or encoded image" },
+        "bannerUrl": { "type": "string", "description": "Discord-style profile banner background image" },
+        "customStatus": { "type": "string", "description": "Optional custom status text" },
+        "peyPoints": { "type": "integer", "description": "P E Y points balance (200 on sign-in, +200 per friend)" },
+        "ownedFrames": { "type": "array", "description": "Unlocked profile frame IDs" },
+        "equippedFrame": { "type": "string", "description": "Currently equipped profile frame ID" },
+        "ownedProfileEffects": { "type": "array", "description": "Unlocked Discord-style 5s video profile effect IDs" },
+        "equippedProfileEffect": { "type": "string", "description": "Currently active 5s video profile effect ID" },
+        "profileVideoData": { "type": "string", "description": "Optional compressed 5-second MP4 data URI for custom profile effect" },
+        "rewardedFriendUids": { "type": "array", "description": "Friend UIDs already rewarded with +200 P E Y" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["userId", "email", "displayName", "friendCode", "status", "createdAt"]
+    },
+    "PublicProfile": {
+      "title": "PublicProfile",
+      "description": "Non-PII public user card visible to authenticated peers.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "friendCode": { "type": "string" },
+        "status": { "type": "string", "enum": ["online", "idle", "dnd", "offline"] },
+        "photoUrl": { "type": "string" },
+        "bannerUrl": { "type": "string" },
+        "customStatus": { "type": "string" },
+        "equippedFrame": { "type": "string" },
+        "equippedProfileEffect": { "type": "string" },
+        "profileVideoData": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "friendCode", "status", "createdAt"]
+    },
+    "LookupKey": {
+      "title": "LookupKey",
+      "description": "Privacy-preserving friend lookup document keyed by SHA-256 email hash or friend code.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "friendCode": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "friendCode", "createdAt"]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Friend request and accepted friendship state between two users.",
+      "type": "object",
+      "properties": {
+        "participantIds": { "type": "array", "description": "Bounded 2-element list of UIDs" },
+        "requesterId": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "requesterName": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "requesterCode": { "type": "string" },
+        "recipientCode": { "type": "string" },
+        "requesterPhoto": { "type": "string" },
+        "recipientPhoto": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "participantIds",
+        "requesterId",
+        "recipientId",
+        "requesterName",
+        "recipientName",
+        "requesterCode",
+        "recipientCode",
+        "status",
+        "createdAt"
+      ]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Direct Message thread between two friends.",
+      "type": "object",
+      "properties": {
+        "participantIds": { "type": "array", "description": "Bounded 2-element list of UIDs" },
+        "participantAId": { "type": "string" },
+        "participantAName": { "type": "string" },
+        "participantAPhoto": { "type": "string" },
+        "participantBId": { "type": "string" },
+        "participantBName": { "type": "string" },
+        "participantBPhoto": { "type": "string" },
+        "lastMessageText": { "type": "string" },
+        "lastMessageSenderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "participantIds",
+        "participantAId",
+        "participantAName",
+        "participantBId",
+        "participantBName",
+        "createdAt"
+      ]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "Message in a 1-on-1 DM conversation.",
+      "type": "object",
+      "properties": {
+        "conversationId": { "type": "string" },
+        "participantIds": { "type": "array", "description": "Bounded 2-element list of UIDs" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderPhoto": { "type": "string" },
+        "text": { "type": "string" },
+        "replyToText": { "type": "string" },
+        "edited": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["conversationId", "participantIds", "senderId", "senderName", "text", "createdAt"]
+    },
+    "Server": {
+      "title": "Server",
+      "description": "Discord-style friend server/guild with channels.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "iconEmoji": { "type": "string" },
+        "iconUrl": { "type": "string" },
+        "accentHex": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "inviteCode": { "type": "string" },
+        "memberUids": { "type": "array", "description": "Bounded list of member UIDs (max 25)" },
+        "channels": { "type": "array", "description": "Bounded list of channel names (max 15)" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "iconEmoji", "accentHex", "ownerId", "inviteCode", "memberUids", "channels", "createdAt"]
+    },
+    "ServerInvite": {
+      "title": "ServerInvite",
+      "description": "Invite code or server name lookup record mapping to a server.",
+      "type": "object",
+      "properties": {
+        "inviteCode": { "type": "string" },
+        "serverId": { "type": "string" },
+        "serverName": { "type": "string" },
+        "iconEmoji": { "type": "string" },
+        "iconUrl": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["inviteCode", "serverId", "serverName", "iconEmoji", "ownerId", "createdAt"]
+    },
+    "ServerMessage": {
+      "title": "ServerMessage",
+      "description": "Message inside a server text channel.",
+      "type": "object",
+      "properties": {
+        "serverId": { "type": "string" },
+        "channelName": { "type": "string" },
+        "memberUids": { "type": "array", "description": "Denormalized bounded list of server member UIDs (max 25)" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderPhoto": { "type": "string" },
+        "text": { "type": "string" },
+        "replyToText": { "type": "string" },
+        "edited": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["serverId", "channelName", "memberUids", "senderId", "senderName", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserPrivate" },
+      "description": "Owner-only user profile containing Gmail address PII."
+    },
+    "/public_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/PublicProfile" },
+      "description": "Public non-PII user display profile."
+    },
+    "/lookup_keys/{keyId}": {
+      "schema": { "$ref": "#/entities/LookupKey" },
+      "description": "Privacy-safe friend lookup keys by SHA-256 email hash or friend code."
+    },
+    "/friendships/{friendshipId}": {
+      "schema": { "$ref": "#/entities/Friendship" },
+      "description": "Friendships and friend requests between two users."
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Direct Message conversations between two friends."
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/DirectMessage" },
+      "description": "Real-time direct messages within a conversation."
+    },
+    "/servers/{serverId}": {
+      "schema": { "$ref": "#/entities/Server" },
+      "description": "Discord-style friend servers with channels."
+    },
+    "/server_invites/{inviteCode}": {
+      "schema": { "$ref": "#/entities/ServerInvite" },
+      "description": "Server invite codes for joining a server."
+    },
+    "/servers/{serverId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ServerMessage" },
+      "description": "Real-time messages within a server channel."
+    }
+  }
+}

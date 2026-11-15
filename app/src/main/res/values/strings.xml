@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">neov chat</string>
+    <string name="sign_in_with_google">Sign in with Google</string>
+    <string name="cordly_tagline">Hang out, create servers, and message friends in real time using your Google account.</string>
+    <string name="direct_messages">Direct Messages</string>
+    <string name="friends">Friends</string>
+    <string name="add_friend">Add Friend</string>
+    <string name="create_server">Create Server</string>
+    <string name="join_server">Join Server</string>
+    <string name="sign_out">Sign Out</string>
+</resources>
