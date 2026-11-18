@@ -58,6 +58,7 @@ import com.example.ui.theme.CordlyEmerald
 import com.example.ui.theme.CordlySurfaceDark
 import com.example.ui.theme.CordlyTextPrimary
 import com.example.ui.theme.CordlyTextSecondary
+import com.example.ui.theme.CordlyThemeState
 import kotlinx.coroutines.launch
 
 @Composable
@@ -388,7 +389,10 @@ fun JoinServerDialog(
             Button(
                 onClick = { onJoin(query) },
                 enabled = query.trim().length >= 2 && !isBusy,
-                colors = ButtonDefaults.buttonColors(containerColor = CordlyCyan, contentColor = Color(0xFF082026)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CordlyCyan,
+                    contentColor = if (CordlyThemeState.isDark) Color(0xFF082026) else Color.White
+                ),
                 modifier = Modifier.testTag("confirm_join_server_button")
             ) {
                 Text(strings.joinButton)

@@ -94,6 +94,55 @@ object VideoEffectHelper {
         }
     }
 
+    suspend fun processPickedFullVideo(
+        context: Context,
+        sourceUri: Uri,
+        uid: String
+    ): Result<ProcessedProfileVideo> = withContext(Dispatchers.IO) {
+        try {
+            val destFile = AppAppearanceStore.customProfileUnlimitedVideoFile(context, uid)
+            if (destFile.exists()) destFile.delete()
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return@withContext Result.failure(IllegalStateException("Unable to read selected video."))
+
+            val retriever = MediaMetadataRetriever()
+            var durationMs = 0L
+            try {
+                retriever.setDataSource(destFile.absolutePath)
+                durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+            } finally {
+                retriever.release()
+            }
+
+            if (durationMs <= 0L || destFile.length() <= 0L) {
+                destFile.delete()
+                return@withContext Result.failure(IllegalArgumentException("Selected file is not a valid video."))
+            }
+
+            val dataUri = if (destFile.length() <= MAX_CLOUD_VIDEO_RAW_BYTES) {
+                val bytes = destFile.readBytes()
+                DATA_VIDEO_PREFIX + Base64.encodeToString(bytes, Base64.NO_WRAP)
+            } else {
+                null
+            }
+
+            Result.success(
+                ProcessedProfileVideo(
+                    localFile = destFile,
+                    dataUri = dataUri,
+                    durationMs = durationMs,
+                    cloudSynced = dataUri != null
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun trimVideoTo5Seconds(
         inputFile: File,
         outputFile: File,
@@ -184,6 +233,19 @@ object VideoEffectHelper {
 
         if (effect.rawResId != null) {
             return ProfileVideoSource.RawRes(effect.rawResId)
+        }
+
+        if (effect.id == "custom_video_unlimited") {
+            val unlimitedFile = AppAppearanceStore.customProfileUnlimitedVideoFile(context, uid)
+            if (unlimitedFile.exists() && unlimitedFile.length() > 0L) {
+                return ProfileVideoSource.LocalFile(unlimitedFile)
+            }
+            if (!profileVideoData.isNullOrBlank() && profileVideoData.startsWith(DATA_VIDEO_PREFIX)) {
+                val cached = materializeDataUriToCache(context, uid, profileVideoData)
+                if (cached != null && cached.exists()) {
+                    return ProfileVideoSource.LocalFile(cached)
+                }
+            }
         }
 
         if (effect.id == "custom_video") {

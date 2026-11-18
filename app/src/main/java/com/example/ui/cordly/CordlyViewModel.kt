@@ -541,8 +541,9 @@ class CordlyViewModel(
         viewModelScope.launch {
             repository.purchaseAndEquipProfileEffect(effect.id, effect.price, videoDataUri)
                 .onSuccess { remaining ->
-                    val syncSuffix = if (localOnlyNotice) " (saved locally; large video skipped cloud sync)" else ""
-                    _snackbarMessage.value = "Equipped 5s video: ${effect.title}! ($remaining P E Y left)$syncSuffix"
+                    val kind = if (effect.isUnlimitedDuration) "unlimited video" else "5s video"
+                    val syncSuffix = if (localOnlyNotice) " (full video saved locally)" else ""
+                    _snackbarMessage.value = "Equipped $kind: ${effect.title}! ($remaining P E Y left)$syncSuffix"
                 }
                 .onFailure { err ->
                     _snackbarMessage.value = err.localizedMessage ?: "Purchase failed."
@@ -561,11 +562,12 @@ class CordlyViewModel(
             repository.equipProfileEffect(effectId, videoDataUri)
                 .onSuccess {
                     val item = PeyShopCatalog.findEffectById(effectId)
-                    val syncSuffix = if (localOnlyNotice) " (saved locally; lighter <500KB clips sync to friends)" else ""
-                    _snackbarMessage.value = "Equipped 5s intro: ${item.title}$syncSuffix"
+                    val kind = if (item.isUnlimitedDuration) "unlimited intro" else "5s intro"
+                    val syncSuffix = if (localOnlyNotice) " (saved locally; smaller <500KB clips sync to friends)" else ""
+                    _snackbarMessage.value = "Equipped $kind: ${item.title}$syncSuffix"
                 }
                 .onFailure { err ->
-                    _snackbarMessage.value = err.localizedMessage ?: "Could not equip 5s video effect."
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not equip video effect."
                 }
             _isBusy.value = false
         }

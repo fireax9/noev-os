@@ -34,11 +34,14 @@ import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircleFilled
 import androidx.compose.material.icons.rounded.Search
@@ -98,6 +101,11 @@ import com.example.ui.theme.CordlyCyan
 import com.example.ui.theme.CordlyDivider
 import com.example.ui.theme.CordlyElevatedSurface
 import com.example.ui.theme.CordlyEmerald
+import com.example.ui.theme.CordlyThemeState
+import com.example.ui.theme.LocalAppAccentColor
+import com.example.ui.theme.LocalAppThemeMode
+import com.example.ui.theme.LocalOnAppAccentColorSelected
+import com.example.ui.theme.LocalOnAppThemeModeSelected
 import com.example.ui.theme.CordlyRailBg
 import com.example.ui.theme.CordlySurfaceDark
 import com.example.ui.theme.CordlyTextPrimary
@@ -334,6 +342,11 @@ fun SettingsAndShopDialog(
                             clearBannerRequested = true
                             onQuickUpdateMedia(null, null, true, "Profile banner")
                         },
+                        onSelectPresetBanner = { preset ->
+                            pendingBannerUrl = preset.bannerSource
+                            clearBannerRequested = false
+                            onQuickUpdateMedia(null, preset.bannerSource, false, "Profile banner")
+                        },
                         onSelectWallpaperMode = onSelectWallpaperMode,
                         onPickCustomWallpaper = {
                             wallpaperPicker.launch(
@@ -434,6 +447,7 @@ private fun SettingsProfileTab(
     onPickAvatar: () -> Unit,
     onPickBanner: () -> Unit,
     onClearBanner: () -> Unit,
+    onSelectPresetBanner: (ProfileBannerPreset) -> Unit,
     onSelectWallpaperMode: (AppWallpaperMode) -> Unit,
     onPickCustomWallpaper: () -> Unit,
     onSave: () -> Unit,
@@ -470,7 +484,7 @@ private fun SettingsProfileTab(
                 Text(
                     text = imageError,
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color(0xFFFFB4AB),
+                    color = CordlyCrimson,
                     modifier = Modifier.padding(10.dp)
                 )
             }
@@ -622,8 +636,223 @@ private fun SettingsProfileTab(
             }
         }
 
-        // App Background Wallpaper Selector (Pure Black + 3 Provided Wallpapers + Custom Photo)
         val strings = LocalAppStrings.current
+        val currentThemeMode = LocalAppThemeMode.current
+        val onThemeModeSelected = LocalOnAppThemeModeSelected.current
+        val currentAccentColor = LocalAppAccentColor.current
+        val onAccentColorSelected = LocalOnAppAccentColorSelected.current
+        val langCode = LocalSelectedLanguageCode.current
+        val isArabicLocale = remember(langCode) {
+            AppLanguageManager.resolveEffectiveCode(langCode).startsWith("ar")
+        }
+
+        // Preset Banner Styles & Shapes Selector (أشكال وخلفيات البانر)
+        Text(
+            text = strings.bannerStylesTitle,
+            style = MaterialTheme.typography.titleMedium,
+            color = CordlyTextPrimary
+        )
+        Text(
+            text = strings.bannerStylesSubtitle,
+            style = MaterialTheme.typography.labelSmall,
+            color = CordlyTextSecondary
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+        ) {
+            ProfileBannerCatalog.presets.forEach { preset ->
+                val isSelected = pendingBannerUrl == preset.bannerSource
+                Surface(
+                    color = CordlyCardSurface,
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        width = if (isSelected) 2.5.dp else 1.dp,
+                        color = if (isSelected) CordlyCyan else CordlyDivider
+                    ),
+                    modifier = Modifier
+                        .width(116.dp)
+                        .height(74.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onSelectPresetBanner(preset) }
+                        .testTag("banner_preset_${preset.id}")
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        PresetBannerCanvas(
+                            preset = preset,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        if (isSelected) {
+                            Icon(
+                                Icons.Rounded.CheckCircle,
+                                contentDescription = "Selected",
+                                tint = CordlyCyan,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(5.dp)
+                                    .size(18.dp)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.62f))
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isArabicLocale) preset.titleAr else preset.titleEn,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Night Mode & Day Mode Switcher
+        Text(
+            text = strings.appearanceModeTitle,
+            style = MaterialTheme.typography.titleMedium,
+            color = CordlyTextPrimary
+        )
+        Text(
+            text = strings.appearanceModeSubtitle,
+            style = MaterialTheme.typography.labelSmall,
+            color = CordlyTextSecondary
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            ThemeModeOptionCard(
+                label = strings.nightModeLabel,
+                icon = Icons.Rounded.DarkMode,
+                previewBg = Color(0xFF000000),
+                previewBorder = Color(0xFF232330),
+                previewContentTint = Color(0xFFF7F8FA),
+                selected = currentThemeMode == AppThemeMode.NIGHT,
+                testTag = "theme_mode_night",
+                onClick = { onThemeModeSelected(AppThemeMode.NIGHT) },
+                modifier = Modifier.weight(1f)
+            )
+            ThemeModeOptionCard(
+                label = strings.dayModeLabel,
+                icon = Icons.Rounded.LightMode,
+                previewBg = Color(0xFFFFFFFF),
+                previewBorder = Color(0xFFCBD5E1),
+                previewContentTint = Color(0xFFF59E0B),
+                selected = currentThemeMode == AppThemeMode.DAY,
+                testTag = "theme_mode_day",
+                onClick = { onThemeModeSelected(AppThemeMode.DAY) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // App Color Picker (تغيير لون التطبيق)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = strings.appColorTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = CordlyTextPrimary
+                )
+                Text(
+                    text = strings.appColorSubtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CordlyTextSecondary
+                )
+            }
+            Surface(
+                color = currentAccentColor.primary.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, currentAccentColor.primary.copy(alpha = 0.55f))
+            ) {
+                Text(
+                    text = if (isArabicLocale) currentAccentColor.labelAr else currentAccentColor.labelEn,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = currentAccentColor.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                )
+            }
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 2.dp)
+        ) {
+            AppAccentColor.entries.forEach { accent ->
+                val isSelected = accent == currentAccentColor
+                val label = if (isArabicLocale) accent.labelAr else accent.labelEn
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onAccentColorSelected(accent) }
+                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                        .testTag("app_color_${accent.storageKey}")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isSelected) accent.primary.copy(alpha = 0.22f)
+                                else CordlyCardSurface
+                            )
+                            .border(
+                                width = if (isSelected) 2.5.dp else 1.dp,
+                                color = if (isSelected) accent.primary else CordlyDivider,
+                                shape = CircleShape
+                            )
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(accent.primary, accent.darkSecondary)
+                                    )
+                                )
+                        ) {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = label,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) CordlyTextPrimary else CordlyTextSecondary,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        // App Background Wallpaper Selector (Pure Black + 3 Provided Wallpapers + Custom Photo)
         Text(
             text = strings.backgroundTitle,
             style = MaterialTheme.typography.titleMedium,
@@ -645,7 +874,11 @@ private fun SettingsProfileTab(
                 AppWallpaperMode.DEFAULT,
                 AppWallpaperMode.PRESET_1,
                 AppWallpaperMode.PRESET_2,
-                AppWallpaperMode.PRESET_3
+                AppWallpaperMode.PRESET_3,
+                AppWallpaperMode.SHAPE_HEX,
+                AppWallpaperMode.SHAPE_AURORA,
+                AppWallpaperMode.SHAPE_WAVES,
+                AppWallpaperMode.SHAPE_GALAXY
             ).forEach { mode ->
                 WallpaperSwatchCard(
                     mode = mode,
@@ -806,6 +1039,74 @@ private fun SettingsProfileTab(
 }
 
 @Composable
+private fun ThemeModeOptionCard(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    previewBg: Color,
+    previewBorder: Color,
+    previewContentTint: Color,
+    selected: Boolean,
+    testTag: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = if (selected) CordlyBlurple.copy(alpha = 0.16f) else CordlyCardSurface,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            width = if (selected) 2.dp else 1.dp,
+            color = if (selected) CordlyBlurple else CordlyDivider
+        ),
+        modifier = modifier
+            .height(64.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp)
+        ) {
+            Surface(
+                color = previewBg,
+                shape = CircleShape,
+                border = BorderStroke(1.5.dp, previewBorder),
+                modifier = Modifier.size(34.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = previewContentTint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall,
+                color = CordlyTextPrimary,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Rounded.CheckCircle,
+                    contentDescription = null,
+                    tint = CordlyBlurple,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun WallpaperSwatchCard(
     mode: AppWallpaperMode,
     selected: Boolean,
@@ -829,21 +1130,31 @@ private fun WallpaperSwatchCard(
             .testTag("wallpaper_swatch_${mode.storageKey}")
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            if (presetRes != null) {
-                AsyncImage(
-                    model = presetRes,
-                    contentDescription = mode.label,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(listOf(CordlyRailBg, CordlyCanvasBg))
-                        )
-                )
+            when {
+                mode.isShapeWallpaper() -> {
+                    WallpaperShapeCanvas(
+                        mode = mode,
+                        isDark = CordlyThemeState.isDark,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                presetRes != null -> {
+                    AsyncImage(
+                        model = presetRes,
+                        contentDescription = mode.label,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                else -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(listOf(CordlyRailBg, CordlyCanvasBg))
+                            )
+                    )
+                }
             }
 
             if (selected) {
@@ -866,7 +1177,11 @@ private fun WallpaperSwatchCard(
                     .padding(horizontal = 6.dp, vertical = 5.dp)
             ) {
                 Text(
-                    text = mode.label,
+                    text = if (mode == AppWallpaperMode.DEFAULT && !CordlyThemeState.isDark) {
+                        "Clean Day"
+                    } else {
+                        mode.label
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = Color.White,
                     maxLines = 1,
@@ -894,9 +1209,10 @@ private fun PeyShopTab(
     val clipboard = LocalClipboardManager.current
     val strings = LocalAppStrings.current
 
-    var shopSection by remember { mutableIntStateOf(0) } // 0 = 5s Profile Videos, 1 = Animated Frames
+    var shopSection by remember { mutableIntStateOf(0) } // 0 = Profile Videos, 1 = Animated Frames
     var processingVideoError by remember { mutableStateOf<String?>(null) }
     var isProcessingVideo by remember { mutableStateOf(false) }
+    var pendingUploadEffectId by remember { mutableStateOf("custom_video") }
     var channelNameInput by remember { mutableStateOf("") }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -922,28 +1238,37 @@ private fun PeyShopTab(
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
+        val targetEffectId = pendingUploadEffectId
         if (uri != null && uid.isNotBlank()) {
             processingVideoError = null
             isProcessingVideo = true
             scope.launch {
-                val processedResult = VideoEffectHelper.processPickedVideoTo5Seconds(
-                    context = context,
-                    sourceUri = uri,
-                    uid = uid
-                )
+                val targetEffect = PeyShopCatalog.findEffectById(targetEffectId)
+                val processedResult = if (targetEffect.isUnlimitedDuration) {
+                    VideoEffectHelper.processPickedFullVideo(
+                        context = context,
+                        sourceUri = uri,
+                        uid = uid
+                    )
+                } else {
+                    VideoEffectHelper.processPickedVideoTo5Seconds(
+                        context = context,
+                        sourceUri = uri,
+                        uid = uid
+                    )
+                }
                 isProcessingVideo = false
                 processedResult
                     .onSuccess { processed ->
-                        val customEffect = PeyShopCatalog.findEffectById("custom_video")
-                        val alreadyOwned = ownedEffects.contains("custom_video")
+                        val alreadyOwned = ownedEffects.contains(targetEffect.id)
                         if (alreadyOwned) {
-                            onEquipProfileEffect("custom_video", processed.dataUri, !processed.cloudSynced)
+                            onEquipProfileEffect(targetEffect.id, processed.dataUri, !processed.cloudSynced)
                         } else {
-                            onBuyProfileEffect(customEffect, processed.dataUri, !processed.cloudSynced)
+                            onBuyProfileEffect(targetEffect, processed.dataUri, !processed.cloudSynced)
                         }
                     }
                     .onFailure { err ->
-                        processingVideoError = err.localizedMessage ?: "Failed to trim picked video to 5 seconds."
+                        processingVideoError = err.localizedMessage ?: "Failed to load selected video."
                     }
             }
         }
@@ -1209,7 +1534,7 @@ private fun PeyShopTab(
                     Text(
                         text = processingVideoError.orEmpty(),
                         style = MaterialTheme.typography.labelMedium,
-                        color = Color(0xFFFFB4AB),
+                        color = CordlyCrimson,
                         modifier = Modifier.padding(10.dp)
                     )
                 }
@@ -1219,7 +1544,7 @@ private fun PeyShopTab(
         if (shopSection == 0) {
             item {
                 Text(
-                    text = "Discord-style 5-second profile video animations (plays automatically whenever someone opens your profile!).",
+                    text = "Discord-style profile video animations: choose 5s clips (from 100 P E Y) or unlock Unlimited Full Video (1000 P E Y) with no time limit!",
                     style = MaterialTheme.typography.labelSmall,
                     color = CordlyTextSecondary
                 )
@@ -1229,8 +1554,13 @@ private fun PeyShopTab(
                 val isOwned = effect.id == "none" || ownedEffects.contains(effect.id)
                 val isEquipped = equippedEffect == effect.id
                 val canAfford = balance >= effect.price
-                val customFile = remember(uid, profile?.profileVideoData) {
-                    if (uid.isNotBlank()) AppAppearanceStore.customProfileVideoFile(context, uid) else null
+                val customFile = remember(uid, effect.id, profile?.profileVideoData) {
+                    when {
+                        uid.isBlank() -> null
+                        effect.isUnlimitedDuration -> AppAppearanceStore.customProfileUnlimitedVideoFile(context, uid)
+                        effect.isCustomUpload -> AppAppearanceStore.customProfileVideoFile(context, uid)
+                        else -> null
+                    }
                 }
                 val hasCustomFile = effect.isCustomUpload &&
                     ((customFile != null && customFile.exists()) || !profile?.profileVideoData.isNullOrBlank())
@@ -1240,7 +1570,7 @@ private fun PeyShopTab(
                     shape = RoundedCornerShape(16.dp),
                     border = BorderStroke(
                         width = if (isEquipped) 1.5.dp else 1.dp,
-                        color = if (isEquipped) CordlyCyan else CordlyDivider
+                        color = if (isEquipped) CordlyCyan else if (effect.isUnlimitedDuration) CordlyAmber.copy(alpha = 0.65f) else CordlyDivider
                     ),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1248,7 +1578,7 @@ private fun PeyShopTab(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(12.dp)
                     ) {
-                        // Lightweight preview box for 5s video animation (full MP4 plays smoothly in DiscordProfileSheetDialog)
+                        // Lightweight preview box for video animation (full MP4 plays smoothly in DiscordProfileSheetDialog)
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, CordlyDivider),
@@ -1272,9 +1602,26 @@ private fun PeyShopTab(
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = if (effect.isCustomUpload) Icons.Rounded.VideoLibrary else Icons.Rounded.PlayCircleFilled,
-                                            contentDescription = "Preview 5s effect",
+                                            contentDescription = "Preview video effect",
                                             tint = Color.White,
                                             modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+                                }
+                                if (effect.isUnlimitedDuration) {
+                                    Surface(
+                                        color = CordlyAmber,
+                                        shape = RoundedCornerShape(4.dp),
+                                        modifier = Modifier
+                                            .align(Alignment.BottomCenter)
+                                            .padding(bottom = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "∞ FULL",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Black,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                         )
                                     }
                                 }
@@ -1312,8 +1659,14 @@ private fun PeyShopTab(
                                 horizontalAlignment = Alignment.End,
                                 verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
+                                val pickButtonTag = if (effect.isUnlimitedDuration) {
+                                    "pick_custom_video_unlimited_button"
+                                } else {
+                                    "pick_custom_video_effect_button"
+                                }
                                 Button(
                                     onClick = {
+                                        pendingUploadEffectId = effect.id
                                         videoPicker.launch(
                                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
                                         )
@@ -1325,24 +1678,25 @@ private fun PeyShopTab(
                                     ),
                                     shape = RoundedCornerShape(10.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                    modifier = Modifier.testTag("pick_custom_video_effect_button")
+                                    modifier = Modifier.testTag(pickButtonTag)
                                 ) {
                                     Text(
                                         text = when {
-                                            isProcessingVideo -> "5s..."
-                                            isOwned -> "Pick Video"
-                                            else -> "Unlock"
+                                            isProcessingVideo && pendingUploadEffectId == effect.id ->
+                                                if (effect.isUnlimitedDuration) "..." else "5s..."
+                                            isOwned -> strings.pickVideoButton
+                                            else -> strings.unlockButton
                                         }
                                     )
                                 }
                                 if (hasCustomFile && !isEquipped && isOwned) {
                                     OutlinedButton(
-                                        onClick = { onEquipProfileEffect("custom_video", null, false) },
+                                        onClick = { onEquipProfileEffect(effect.id, null, false) },
                                         enabled = !isBusy,
                                         shape = RoundedCornerShape(10.dp),
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
-                                        Text("Equip", color = CordlyTextPrimary, style = MaterialTheme.typography.labelSmall)
+                                        Text(strings.equipButton, color = CordlyTextPrimary, style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }

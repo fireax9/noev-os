@@ -105,6 +105,7 @@ private class VideoTextureController {
 @Composable
 fun ProfileVideoBackgroundPlayer(
     source: ProfileVideoSource,
+    isUnlimitedDuration: Boolean = false,
     modifier: Modifier = Modifier,
     onProgressFraction: ((Float) -> Unit)? = null
 ) {
@@ -112,18 +113,22 @@ fun ProfileVideoBackgroundPlayer(
     val controller = remember { VideoTextureController() }
     val latestOnProgress = androidx.compose.runtime.rememberUpdatedState(onProgressFraction)
 
-    LaunchedEffect(source) {
+    LaunchedEffect(source, isUnlimitedDuration) {
         while (isActive) {
             val player = controller.activePlayer
             if (player != null) {
                 try {
                     if (player.isPlaying) {
                         val pos = player.currentPosition
-                        if (pos >= VideoEffectHelper.MAX_PROFILE_VIDEO_MS.toInt()) {
-                            player.seekTo(0)
+                        val totalMs = if (isUnlimitedDuration) {
+                            player.duration.takeIf { it > 0 } ?: 1
+                        } else {
+                            if (pos >= VideoEffectHelper.MAX_PROFILE_VIDEO_MS.toInt()) {
+                                player.seekTo(0)
+                            }
+                            VideoEffectHelper.MAX_PROFILE_VIDEO_MS.toInt()
                         }
-                        val fraction = (pos.toFloat() / VideoEffectHelper.MAX_PROFILE_VIDEO_MS.toFloat())
-                            .coerceIn(0f, 1f)
+                        val fraction = (pos.toFloat() / totalMs.toFloat()).coerceIn(0f, 1f)
                         latestOnProgress.value?.invoke(fraction)
                     }
                 } catch (_: Exception) {
@@ -305,10 +310,11 @@ fun DiscordProfileSheetDialog(
                 .testTag("discord_profile_viewer_dialog")
         ) {
             Box(modifier = Modifier.fillMaxWidth()) {
-                // Full-card Discord 5s Profile Video Effect layer (when equipped)
+                // Full-card Discord Profile Video Effect layer (5s or ∞ unlimited when equipped)
                 if (videoSource != null) {
                     ProfileVideoBackgroundPlayer(
                         source = videoSource,
+                        isUnlimitedDuration = effectItem.isUnlimitedDuration,
                         onProgressFraction = { progressState.floatValue = it },
                         modifier = Modifier.matchParentSize()
                     )
@@ -381,7 +387,11 @@ fun DiscordProfileSheetDialog(
                                         )
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "${effectItem.title} • 5s Loop",
+                                            text = if (effectItem.isUnlimitedDuration) {
+                                                "${effectItem.title} • ∞ Full Video"
+                                            } else {
+                                                "${effectItem.title} • 5s Loop"
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
                                             color = Color.White,
                                             fontWeight = FontWeight.SemiBold,

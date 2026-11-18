@@ -740,9 +740,9 @@ private fun HomeHubContent(
                 modifier = Modifier.weight(1f)
             ) {
                 Surface(
-                    color = Color.Black,
+                    color = Color(0xFF5865F2),
                     shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
                     modifier = Modifier.size(32.dp)
                 ) {
                     AsyncImage(
@@ -847,6 +847,10 @@ private fun HomeHubContent(
                         )
                     }
 
+                    val hasBannerPhoto = !ownProfile.bannerUrl.isNullOrBlank()
+                    val codeTint = if (hasBannerPhoto) Color(0xFF22D3EE) else CordlyCyan
+                    val balanceTint = if (hasBannerPhoto) Color(0xFFF0B232) else CordlyAmber
+
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
@@ -855,12 +859,12 @@ private fun HomeHubContent(
                             Text(
                                 text = "${strings.codePrefix}: ${ownProfile.friendCode}",
                                 style = MaterialTheme.typography.labelLarge,
-                                color = CordlyCyan
+                                color = codeTint
                             )
                             Text(
                                 text = "${strings.balanceLabel}: ${ownProfile.peyPoints} P E Y",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = CordlyAmber,
+                                color = balanceTint,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -873,7 +877,7 @@ private fun HomeHubContent(
                             Icon(
                                 imageVector = Icons.Rounded.ContentCopy,
                                 contentDescription = strings.copyAction,
-                                tint = CordlyCyan
+                                tint = codeTint
                             )
                         }
                     }

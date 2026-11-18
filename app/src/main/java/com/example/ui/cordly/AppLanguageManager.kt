@@ -135,7 +135,15 @@ data class AppStrings(
     val cameraOff: String,
     val flipCamera: String,
     val permissionCallRequired: String,
-    val grantPermissions: String
+    val grantPermissions: String,
+    val appearanceModeTitle: String = "Display Mode (Night & Day)",
+    val appearanceModeSubtitle: String = "Switch between Night Mode (Pure Black) and bright Day Mode.",
+    val nightModeLabel: String = "Night Mode",
+    val dayModeLabel: String = "Day Mode",
+    val appColorTitle: String = "App Color",
+    val appColorSubtitle: String = "Choose your favorite accent color across neov chat.",
+    val bannerStylesTitle: String = "Banner Shapes & Styles",
+    val bannerStylesSubtitle: String = "Pick a geometric Discord banner or upload your own photo."
 )
 
 val EnglishStrings = AppStrings(
@@ -192,7 +200,7 @@ val EnglishStrings = AppStrings(
     statusIdle = "Idle",
     statusDnd = "Do Not Disturb",
     statusOffline = "Offline",
-    shopVideosTab = "5s Videos",
+    shopVideosTab = "Profile Videos",
     shopFramesTab = "Frames",
     shopRewardsTitle = "Free P E Y Rewards",
     dailyRewardTitle = "Daily Check-In Reward",
@@ -257,7 +265,15 @@ val EnglishStrings = AppStrings(
     cameraOff = "Cam Off",
     flipCamera = "Flip",
     permissionCallRequired = "Microphone & Camera permission required for voice/video calls.",
-    grantPermissions = "Allow Mic & Camera"
+    grantPermissions = "Allow Mic & Camera",
+    appearanceModeTitle = "Display Mode (Night & Day)",
+    appearanceModeSubtitle = "Switch between Night Mode (Pure Black) and bright Day Mode.",
+    nightModeLabel = "Night Mode",
+    dayModeLabel = "Day Mode",
+    appColorTitle = "App Color",
+    appColorSubtitle = "Choose your favorite accent color across neov chat.",
+    bannerStylesTitle = "Banner Shapes & Styles",
+    bannerStylesSubtitle = "Pick a geometric Discord banner or upload your own photo."
 )
 
 val ArabicStrings = AppStrings(
@@ -314,8 +330,8 @@ val ArabicStrings = AppStrings(
     statusIdle = "خامل",
     statusDnd = "عدم الإزعاج",
     statusOffline = "غير متصل",
-    shopVideosTab = "فيديو 5 ثواني",
-    shopFramesTab = "إطارات البروفايل",
+    shopVideosTab = "فيديو البروفايل",
+    shopFramesTab = "أشكال البروفايل",
     shopRewardsTitle = "طرق ربح نقاط P E Y مجاناً",
     dailyRewardTitle = "المكافأة اليومية (كل يوم)",
     dailyRewardFirstSub = "احصل على +100 P E Y يومياً (أول يومين)، ثم +50 P E Y كل يوم!",
@@ -379,7 +395,15 @@ val ArabicStrings = AppStrings(
     cameraOff = "إيقاف الكاميرا",
     flipCamera = "تبديل الكاميرا",
     permissionCallRequired = "يرجى السماح بالمايكروفون والكاميرا لإجراء المكالمات الصوتية والمرئية.",
-    grantPermissions = "تفعيل المايك والكاميرا"
+    grantPermissions = "تفعيل المايك والكاميرا",
+    appearanceModeTitle = "وضع الليل والنهار",
+    appearanceModeSubtitle = "بدّل بسهولة بين الوضع الليلي الأسود ووضع النهار الفاتح.",
+    nightModeLabel = "وضع الليل",
+    dayModeLabel = "وضع النهار",
+    appColorTitle = "لون التطبيق",
+    appColorSubtitle = "اختر لون التطبيق المفضل للأزرار والمحادثات والقوائم.",
+    bannerStylesTitle = "أشكال وخلفيات البانر",
+    bannerStylesSubtitle = "اختر شكلاً جاهزاً للبانر أو ارفع صورتك الخاصة."
 )
 
 val FrenchStrings = EnglishStrings.copy(
@@ -428,7 +452,11 @@ val FrenchStrings = EnglishStrings.copy(
     speakerOn = "Haut-parleur",
     cameraOn = "Caméra On",
     cameraOff = "Caméra Off",
-    flipCamera = "Pivoter"
+    flipCamera = "Pivoter",
+    appearanceModeTitle = "Mode Nuit et Jour",
+    nightModeLabel = "Mode Nuit",
+    dayModeLabel = "Mode Jour",
+    appColorTitle = "Couleur de l'application"
 )
 
 val SpanishStrings = EnglishStrings.copy(
@@ -473,7 +501,11 @@ val SpanishStrings = EnglishStrings.copy(
     speakerOn = "Altavoz",
     cameraOn = "Cámara",
     cameraOff = "Apagar cám",
-    flipCamera = "Girar"
+    flipCamera = "Girar",
+    appearanceModeTitle = "Modo Noche y Día",
+    nightModeLabel = "Modo Noche",
+    dayModeLabel = "Modo Día",
+    appColorTitle = "Color de la aplicación"
 )
 
 val GermanStrings = EnglishStrings.copy(
@@ -516,7 +548,11 @@ val TurkishStrings = EnglishStrings.copy(
     languageTitle = "Dünya Dilleri",
     acceptCall = "Yanıtla",
     declineCall = "Reddet",
-    endCall = "Bitir"
+    endCall = "Bitir",
+    appearanceModeTitle = "Gece ve Gündüz Modu",
+    nightModeLabel = "Gece Modu",
+    dayModeLabel = "Gündüz Modu",
+    appColorTitle = "Uygulama Rengi"
 )
 
 val PortugueseStrings = EnglishStrings.copy(

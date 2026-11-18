@@ -26,17 +26,22 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.foundation.clickable
 import com.example.ui.cordly.AppLanguageManager
+import com.example.ui.cordly.AppThemeMode
 import com.example.ui.cordly.LocalAppStrings
 import com.example.ui.cordly.LocalOnLanguageSelected
 import com.example.ui.cordly.LocalSelectedLanguageCode
 import com.example.ui.cordly.WorldLanguagePickerDialog
+import com.example.ui.theme.LocalAppThemeMode
+import com.example.ui.theme.LocalOnAppThemeModeSelected
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,6 +76,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import com.example.R
+import com.example.ui.theme.CordlyAmber
 import com.example.ui.theme.CordlyBlurple
 import com.example.ui.theme.CordlyCanvasBg
 import com.example.ui.theme.CordlyCardSurface
@@ -78,6 +84,7 @@ import com.example.ui.theme.CordlyCrimson
 import com.example.ui.theme.CordlyCyan
 import com.example.ui.theme.CordlyEmerald
 import com.example.ui.theme.CordlyRailBg
+import com.example.ui.theme.CordlySurfaceDark
 import com.example.ui.theme.CordlyTextPrimary
 import com.example.ui.theme.CordlyTextSecondary
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -213,6 +220,8 @@ fun AuthScreen(
     val strings = LocalAppStrings.current
     val currentLanguageCode = LocalSelectedLanguageCode.current
     val onLanguageSelected = LocalOnLanguageSelected.current
+    val currentThemeMode = LocalAppThemeMode.current
+    val onThemeModeSelected = LocalOnAppThemeModeSelected.current
 
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -234,7 +243,7 @@ fun AuthScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color.Black, Color(0xFF060609), Color.Black)
+                    colors = listOf(CordlyRailBg, CordlyCanvasBg, CordlySurfaceDark)
                 )
             )
             .statusBarsPadding()
@@ -255,11 +264,42 @@ fun AuthScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 10.dp)
                 ) {
+                    val isNight = currentThemeMode == AppThemeMode.NIGHT
+                    Surface(
+                        color = CordlyCardSurface,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, CordlyBlurple.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable {
+                                onThemeModeSelected(if (isNight) AppThemeMode.DAY else AppThemeMode.NIGHT)
+                            }
+                            .testTag("auth_theme_toggle_button")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isNight) Icons.Rounded.DarkMode else Icons.Rounded.LightMode,
+                                contentDescription = if (isNight) strings.nightModeLabel else strings.dayModeLabel,
+                                tint = if (isNight) CordlyCyan else CordlyAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isNight) strings.nightModeLabel else strings.dayModeLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CordlyTextPrimary
+                            )
+                        }
+                    }
+
                     Surface(
                         color = CordlyCardSurface,
                         shape = RoundedCornerShape(14.dp),
@@ -321,9 +361,9 @@ fun AuthScreen(
                             .padding(16.dp)
                     ) {
                         Surface(
-                            color = Color.Black,
+                            color = Color(0xFF5865F2),
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
                             modifier = Modifier.size(44.dp)
                         ) {
                             AsyncImage(

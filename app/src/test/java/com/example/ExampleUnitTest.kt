@@ -1,9 +1,16 @@
 package com.example
 
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.LayoutDirection
 import com.example.data.model.UserPrivate
 import com.example.data.repository.CordlyRepository
+import com.example.ui.cordly.AppAccentColor
 import com.example.ui.cordly.AppLanguageManager
+import com.example.ui.cordly.AppThemeMode
+import com.example.ui.theme.CordlyBlurple
+import com.example.ui.theme.CordlyCanvasBg
+import com.example.ui.theme.CordlyTextPrimary
+import com.example.ui.theme.CordlyThemeState
 import com.google.firebase.Timestamp
 import org.junit.Assert.*
 import org.junit.Test
@@ -75,9 +82,56 @@ class ExampleUnitTest {
     assertEquals(LayoutDirection.Ltr, AppLanguageManager.layoutDirectionFor("en"))
     assertEquals("متجر P E Y", AppLanguageManager.stringsFor("ar").tabPeyShop)
     assertEquals("P E Y Shop", AppLanguageManager.stringsFor("en").tabPeyShop)
+    assertEquals("وضع الليل", AppLanguageManager.stringsFor("ar").nightModeLabel)
+    assertEquals("وضع النهار", AppLanguageManager.stringsFor("ar").dayModeLabel)
+    assertEquals("لون التطبيق", AppLanguageManager.stringsFor("ar").appColorTitle)
     assertNotEquals(
       AppLanguageManager.stringsFor("en").voiceCallAction,
       AppLanguageManager.stringsFor("fr").voiceCallAction
     )
+  }
+
+  @Test
+  fun themeState_switchesBetweenNightDayAndAppColors() {
+    CordlyThemeState.themeMode = AppThemeMode.NIGHT
+    CordlyThemeState.accentColor = AppAccentColor.BLURPLE
+    assertEquals(Color(0xFF000000), CordlyCanvasBg)
+    assertEquals(Color(0xFFF7F8FA), CordlyTextPrimary)
+    assertEquals(AppAccentColor.BLURPLE.primary, CordlyBlurple)
+
+    CordlyThemeState.themeMode = AppThemeMode.DAY
+    CordlyThemeState.accentColor = AppAccentColor.EMERALD
+    assertEquals(Color(0xFFFFFFFF), CordlyCanvasBg)
+    assertEquals(Color(0xFF0F172A), CordlyTextPrimary)
+    assertEquals(AppAccentColor.EMERALD.primary, CordlyBlurple)
+
+    // Reset defaults
+    CordlyThemeState.themeMode = AppThemeMode.NIGHT
+    CordlyThemeState.accentColor = AppAccentColor.BLURPLE
+  }
+
+  @Test
+  fun shopCatalog_includesUnlimitedVideoAndGeometricShapes() {
+    val unlimited = com.example.ui.cordly.PeyShopCatalog.findEffectById("custom_video_unlimited")
+    assertEquals("custom_video_unlimited", unlimited.id)
+    assertEquals(1000L, unlimited.price)
+    assertTrue(unlimited.isCustomUpload)
+    assertTrue(unlimited.isUnlimitedDuration)
+
+    val custom5s = com.example.ui.cordly.PeyShopCatalog.findEffectById("custom_video")
+    assertEquals(200L, custom5s.price)
+    assertFalse(custom5s.isUnlimitedDuration)
+
+    assertTrue(com.example.ui.cordly.PeyShopCatalog.frames.size >= 12)
+    val shapeCount = com.example.ui.cordly.PeyShopCatalog.frames.map { it.shapeStyle }.toSet().size
+    assertTrue(shapeCount >= 5)
+
+    assertTrue(com.example.ui.cordly.ProfileBannerCatalog.presets.size >= 8)
+    assertNotNull(com.example.ui.cordly.ProfileBannerCatalog.findBySource("preset_banner:discord_splash"))
+
+    assertTrue(com.example.ui.cordly.AppWallpaperMode.SHAPE_HEX.isShapeWallpaper())
+    assertTrue(com.example.ui.cordly.AppWallpaperMode.SHAPE_AURORA.isShapeWallpaper())
+    assertTrue(com.example.ui.cordly.AppWallpaperMode.SHAPE_WAVES.isShapeWallpaper())
+    assertTrue(com.example.ui.cordly.AppWallpaperMode.SHAPE_GALAXY.isShapeWallpaper())
   }
 }

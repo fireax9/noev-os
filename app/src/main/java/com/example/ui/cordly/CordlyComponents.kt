@@ -10,6 +10,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,11 +55,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.min
+import kotlin.math.sin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -84,6 +95,7 @@ import com.example.ui.theme.CordlySurfaceDark
 import com.example.ui.theme.CordlyTextMuted
 import com.example.ui.theme.CordlyTextPrimary
 import com.example.ui.theme.CordlyTextSecondary
+import com.example.ui.theme.CordlyThemeState
 
 fun statusColor(status: String): Color = when (status) {
     "online" -> CordlyEmerald
@@ -114,6 +126,130 @@ fun parseHexColor(hex: String, fallback: Color = CordlyBlurple): Color {
 }
 
 @Composable
+fun WallpaperShapeCanvas(
+    mode: AppWallpaperMode,
+    isDark: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        when (mode) {
+            AppWallpaperMode.SHAPE_HEX -> {
+                val bg = if (isDark) {
+                    listOf(Color(0xFF040914), Color(0xFF0B1F3A), Color(0xFF071324))
+                } else {
+                    listOf(Color(0xFFE0F2FE), Color(0xFFF0F9FF), Color(0xFFDBEAFE))
+                }
+                drawRect(Brush.linearGradient(bg))
+                val r = (min(w, h) * 0.11f).coerceIn(22f, 76f)
+                val dx = r * 1.72f
+                val dy = r * 1.50f
+                val strokeColor = if (isDark) Color(0xFF22D3EE).copy(alpha = 0.24f) else Color(0xFF0284C7).copy(alpha = 0.20f)
+                var row = 0
+                var y = 0f
+                while (y < h + r) {
+                    var x = if (row % 2 == 0) 0f else dx * 0.5f
+                    while (x < w + r) {
+                        val path = Path().apply {
+                            for (i in 0..5) {
+                                val ang = (60 * i - 30) * PI / 180.0
+                                val px = x + r * 0.86f * cos(ang).toFloat()
+                                val py = y + r * 0.86f * sin(ang).toFloat()
+                                if (i == 0) moveTo(px, py) else lineTo(px, py)
+                            }
+                            close()
+                        }
+                        drawPath(path, color = strokeColor, style = Stroke(width = 1.6f))
+                        x += dx
+                    }
+                    y += dy
+                    row++
+                }
+            }
+            AppWallpaperMode.SHAPE_AURORA -> {
+                val bg = if (isDark) {
+                    listOf(Color(0xFF050816), Color(0xFF102A3B), Color(0xFF1E1B4B))
+                } else {
+                    listOf(Color(0xFFECFDF5), Color(0xFFE0E7FF), Color(0xFFF5F3FF))
+                }
+                drawRect(Brush.verticalGradient(bg))
+                val wave1 = if (isDark) Color(0xFF10B981).copy(alpha = 0.24f) else Color(0xFF059669).copy(alpha = 0.16f)
+                val wave2 = if (isDark) Color(0xFF6366F1).copy(alpha = 0.28f) else Color(0xFF4F46E5).copy(alpha = 0.16f)
+                for (idx in 0..2) {
+                    val y0 = h * (0.28f + idx * 0.22f)
+                    val path = Path().apply {
+                        moveTo(0f, h)
+                        lineTo(0f, y0)
+                        cubicTo(w * 0.35f, y0 - h * 0.16f, w * 0.65f, y0 + h * 0.18f, w, y0 - h * 0.08f)
+                        lineTo(w, h)
+                        close()
+                    }
+                    drawPath(path, color = if (idx % 2 == 0) wave1 else wave2)
+                }
+            }
+            AppWallpaperMode.SHAPE_WAVES -> {
+                val bg = if (isDark) {
+                    listOf(Color(0xFF090614), Color(0xFF1E103C), Color(0xFF0C0524))
+                } else {
+                    listOf(Color(0xFFFDF2F8), Color(0xFFEDE9FE), Color(0xFFEEF2FF))
+                }
+                drawRect(Brush.linearGradient(bg))
+                val ringColor = if (isDark) Color(0xFFEC4899) else Color(0xFF7C3AED)
+                val maxR = min(w, h) * 0.9f
+                for (ring in 1..6) {
+                    val radius = (maxR / 6f) * ring
+                    drawCircle(
+                        color = ringColor.copy(alpha = if (isDark) 0.22f else 0.16f),
+                        radius = radius,
+                        center = Offset(w * 0.82f, h * 0.22f),
+                        style = Stroke(width = 2.4f)
+                    )
+                    drawCircle(
+                        color = CordlyBlurple.copy(alpha = if (isDark) 0.20f else 0.14f),
+                        radius = radius * 0.72f,
+                        center = Offset(w * 0.18f, h * 0.78f),
+                        style = Stroke(width = 2.0f)
+                    )
+                }
+            }
+            AppWallpaperMode.SHAPE_GALAXY -> {
+                val bg = if (isDark) {
+                    listOf(Color(0xFF03030B), Color(0xFF0F172A), Color(0xFF170B3B))
+                } else {
+                    listOf(Color(0xFFF1F5F9), Color(0xFFE0E7FF), Color(0xFFE0F2FE))
+                }
+                drawRect(Brush.verticalGradient(bg))
+                val gridColor = if (isDark) Color(0xFF38BDF8).copy(alpha = 0.16f) else Color(0xFF3B82F6).copy(alpha = 0.14f)
+                val spacing = (min(w, h) * 0.12f).coerceIn(28f, 64f)
+                var x = spacing
+                while (x < w) {
+                    drawLine(gridColor, Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
+                    x += spacing
+                }
+                var y = spacing
+                while (y < h) {
+                    drawLine(gridColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+                    y += spacing
+                }
+                val diamondSize = min(w, h) * 0.24f
+                val cx = w * 0.5f
+                val cy = h * 0.42f
+                val diamond = Path().apply {
+                    moveTo(cx, cy - diamondSize)
+                    lineTo(cx + diamondSize, cy)
+                    lineTo(cx, cy + diamondSize)
+                    lineTo(cx - diamondSize, cy)
+                    close()
+                }
+                drawPath(diamond, color = CordlyBlurple.copy(alpha = if (isDark) 0.26f else 0.18f), style = Stroke(width = 2.5f))
+            }
+            else -> Unit
+        }
+    }
+}
+
+@Composable
 fun AppWallpaperBackground(
     wallpaperState: WallpaperState,
     modifier: Modifier = Modifier
@@ -124,6 +260,11 @@ fun AppWallpaperBackground(
             .background(CordlyCanvasBg)
     ) {
         val presetRes = wallpaperState.mode.drawableRes()
+        val scrimColor = if (CordlyThemeState.isDark) {
+            Color(0xFF080A12).copy(alpha = 0.56f)
+        } else {
+            Color(0xFFF8FAFC).copy(alpha = 0.72f)
+        }
         when {
             wallpaperState.mode == AppWallpaperMode.CUSTOM && wallpaperState.customFilePath != null -> {
                 val customBitmap = rememberFileImageBitmap(
@@ -141,7 +282,22 @@ fun AppWallpaperBackground(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF080A12).copy(alpha = 0.56f))
+                        .background(scrimColor)
+                )
+            }
+            wallpaperState.mode.isShapeWallpaper() -> {
+                WallpaperShapeCanvas(
+                    mode = wallpaperState.mode,
+                    isDark = CordlyThemeState.isDark,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            if (CordlyThemeState.isDark) Color.Black.copy(alpha = 0.22f)
+                            else Color.White.copy(alpha = 0.18f)
+                        )
                 )
             }
             presetRes != null -> {
@@ -154,7 +310,7 @@ fun AppWallpaperBackground(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color(0xFF080A12).copy(alpha = 0.52f))
+                        .background(scrimColor)
                 )
             }
         }
@@ -228,73 +384,215 @@ fun UserAvatar(
                     Modifier.drawBehind {
                         val strokePx = frame.strokeDp.dp.toPx()
                         val ringRadius = (this.size.minDimension - strokePx) / 2f
-                        val centerOffset = androidx.compose.ui.geometry.Offset(
+                        val centerOffset = Offset(
                             this.size.width / 2f,
                             this.size.height / 2f
                         )
+                        val sweepBrush = Brush.sweepGradient(frame.ringColors)
 
                         // Soft pulsing outer halo
                         if (frame.animated) {
                             drawCircle(
-                                color = primaryGlow.copy(alpha = 0.25f * pulseScale),
-                                radius = ringRadius + strokePx * 0.75f,
-                                style = Stroke(width = strokePx * 1.4f)
+                                color = primaryGlow.copy(alpha = 0.24f * pulseScale),
+                                radius = ringRadius + strokePx * 0.7f,
+                                style = Stroke(width = strokePx * 1.3f)
                             )
                         }
 
-                        // Primary spinning sweep ring
-                        rotate(rotationAngle) {
-                            drawCircle(
-                                brush = Brush.sweepGradient(frame.ringColors),
-                                radius = ringRadius,
-                                style = Stroke(width = strokePx)
-                            )
-                        }
-
-                        // Counter-rotating kinetic arcs + orbiting glowing spark particle
-                        if (frame.animated) {
-                            val arcTopLeft = androidx.compose.ui.geometry.Offset(
-                                centerOffset.x - ringRadius,
-                                centerOffset.y - ringRadius
-                            )
-                            val arcSize = androidx.compose.ui.geometry.Size(ringRadius * 2f, ringRadius * 2f)
-                            rotate(counterRotation) {
-                                drawArc(
-                                    color = Color.White.copy(alpha = 0.85f),
-                                    startAngle = 0f,
-                                    sweepAngle = 42f,
-                                    useCenter = false,
-                                    topLeft = arcTopLeft,
-                                    size = arcSize,
-                                    style = Stroke(
-                                        width = strokePx * 0.65f,
-                                        cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        when (frame.shapeStyle) {
+                            FrameShapeStyle.OCTAGON_CYBER -> {
+                                val octPath = Path().apply {
+                                    for (i in 0..7) {
+                                        val ang = (45.0 * i + 22.5) * PI / 180.0
+                                        val px = centerOffset.x + ringRadius * cos(ang).toFloat()
+                                        val py = centerOffset.y + ringRadius * sin(ang).toFloat()
+                                        if (i == 0) moveTo(px, py) else lineTo(px, py)
+                                    }
+                                    close()
+                                }
+                                rotate(rotationAngle * 0.35f) {
+                                    drawPath(
+                                        path = octPath,
+                                        brush = sweepBrush,
+                                        style = Stroke(width = strokePx)
                                     )
-                                )
-                                drawArc(
-                                    color = secondaryGlow.copy(alpha = 0.9f),
-                                    startAngle = 180f,
-                                    sweepAngle = 42f,
-                                    useCenter = false,
-                                    topLeft = arcTopLeft,
-                                    size = arcSize,
-                                    style = Stroke(
-                                        width = strokePx * 0.65f,
-                                        cap = androidx.compose.ui.graphics.StrokeCap.Round
-                                    )
-                                )
+                                }
+                                if (frame.animated) {
+                                    rotate(counterRotation * 0.5f) {
+                                        for (corner in 0..3) {
+                                            val ang = (corner * 90.0) * PI / 180.0
+                                            val pt = Offset(
+                                                centerOffset.x + ringRadius * cos(ang).toFloat(),
+                                                centerOffset.y + ringRadius * sin(ang).toFloat()
+                                            )
+                                            drawCircle(Color.White, radius = (strokePx * 0.72f).coerceAtLeast(2f), center = pt)
+                                        }
+                                    }
+                                }
                             }
-
-                            val rad = Math.toRadians(rotationAngle.toDouble())
-                            val orbCenter = androidx.compose.ui.geometry.Offset(
-                                x = centerOffset.x + (ringRadius * kotlin.math.cos(rad)).toFloat(),
-                                y = centerOffset.y + (ringRadius * kotlin.math.sin(rad)).toFloat()
-                            )
-                            drawCircle(
-                                color = Color.White,
-                                radius = (strokePx * 0.85f).coerceAtLeast(2.2f),
-                                center = orbCenter
-                            )
+                            FrameShapeStyle.PRISM_DIAMOND -> {
+                                val diamondSide = ringRadius * 1.44f
+                                val boxTopLeft = Offset(
+                                    centerOffset.x - diamondSide / 2f,
+                                    centerOffset.y - diamondSide / 2f
+                                )
+                                val boxSize = Size(diamondSide, diamondSide)
+                                val cornerRad = CornerRadius(strokePx * 1.8f, strokePx * 1.8f)
+                                rotate(rotationAngle * 0.5f) {
+                                    drawRoundRect(
+                                        brush = sweepBrush,
+                                        topLeft = boxTopLeft,
+                                        size = boxSize,
+                                        cornerRadius = cornerRad,
+                                        style = Stroke(width = strokePx * 0.92f)
+                                    )
+                                }
+                                rotate(counterRotation * 0.5f + 45f) {
+                                    drawRoundRect(
+                                        color = secondaryGlow.copy(alpha = 0.85f),
+                                        topLeft = boxTopLeft,
+                                        size = boxSize,
+                                        cornerRadius = cornerRad,
+                                        style = Stroke(width = strokePx * 0.72f)
+                                    )
+                                }
+                            }
+                            FrameShapeStyle.DOUBLE_STARBURST -> {
+                                val starPath = Path().apply {
+                                    val points = 12
+                                    for (i in 0 until points * 2) {
+                                        val rad = if (i % 2 == 0) ringRadius else ringRadius * 0.84f
+                                        val ang = (180.0 / points * i) * PI / 180.0
+                                        val px = centerOffset.x + rad * cos(ang).toFloat()
+                                        val py = centerOffset.y + rad * sin(ang).toFloat()
+                                        if (i == 0) moveTo(px, py) else lineTo(px, py)
+                                    }
+                                    close()
+                                }
+                                rotate(rotationAngle * 0.5f) {
+                                    drawPath(starPath, brush = sweepBrush, style = Stroke(width = strokePx * 0.9f))
+                                }
+                                if (frame.animated) {
+                                    rotate(counterRotation) {
+                                        drawCircle(
+                                            color = Color.White.copy(alpha = 0.72f),
+                                            radius = ringRadius * 0.86f,
+                                            style = Stroke(
+                                                width = strokePx * 0.45f,
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 12f))
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            FrameShapeStyle.FLAME_CROWN -> {
+                                rotate(rotationAngle * 0.65f) {
+                                    drawCircle(
+                                        brush = sweepBrush,
+                                        radius = ringRadius,
+                                        style = Stroke(width = strokePx)
+                                    )
+                                }
+                                val flareCount = 6
+                                rotate(counterRotation * 0.35f) {
+                                    for (i in 0 until flareCount) {
+                                        val ang = (360.0 / flareCount * i) * PI / 180.0
+                                        val pInner = Offset(
+                                            centerOffset.x + (ringRadius - strokePx * 0.4f) * cos(ang).toFloat(),
+                                            centerOffset.y + (ringRadius - strokePx * 0.4f) * sin(ang).toFloat()
+                                        )
+                                        val pOuter = Offset(
+                                            centerOffset.x + (ringRadius + strokePx * 1.45f) * cos(ang).toFloat(),
+                                            centerOffset.y + (ringRadius + strokePx * 1.45f) * sin(ang).toFloat()
+                                        )
+                                        drawLine(
+                                            color = if (i % 2 == 0) primaryGlow else Color.White,
+                                            start = pInner,
+                                            end = pOuter,
+                                            strokeWidth = strokePx * 0.85f,
+                                            cap = StrokeCap.Round
+                                        )
+                                    }
+                                }
+                            }
+                            FrameShapeStyle.MATRIX_DASHED -> {
+                                rotate(rotationAngle) {
+                                    drawCircle(
+                                        brush = sweepBrush,
+                                        radius = ringRadius,
+                                        style = Stroke(
+                                            width = strokePx,
+                                            cap = StrokeCap.Round,
+                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 10f))
+                                        )
+                                    )
+                                }
+                                if (frame.animated) {
+                                    rotate(counterRotation) {
+                                        drawCircle(
+                                            color = Color.White.copy(alpha = 0.8f),
+                                            radius = ringRadius * 0.90f,
+                                            style = Stroke(
+                                                width = strokePx * 0.45f,
+                                                cap = StrokeCap.Round,
+                                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 16f))
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            FrameShapeStyle.CIRCLE_ORBIT -> {
+                                rotate(rotationAngle) {
+                                    drawCircle(
+                                        brush = sweepBrush,
+                                        radius = ringRadius,
+                                        style = Stroke(width = strokePx)
+                                    )
+                                }
+                                if (frame.animated) {
+                                    val arcTopLeft = Offset(
+                                        centerOffset.x - ringRadius,
+                                        centerOffset.y - ringRadius
+                                    )
+                                    val arcSize = Size(ringRadius * 2f, ringRadius * 2f)
+                                    rotate(counterRotation) {
+                                        drawArc(
+                                            color = Color.White.copy(alpha = 0.85f),
+                                            startAngle = 0f,
+                                            sweepAngle = 42f,
+                                            useCenter = false,
+                                            topLeft = arcTopLeft,
+                                            size = arcSize,
+                                            style = Stroke(
+                                                width = strokePx * 0.65f,
+                                                cap = StrokeCap.Round
+                                            )
+                                        )
+                                        drawArc(
+                                            color = secondaryGlow.copy(alpha = 0.9f),
+                                            startAngle = 180f,
+                                            sweepAngle = 42f,
+                                            useCenter = false,
+                                            topLeft = arcTopLeft,
+                                            size = arcSize,
+                                            style = Stroke(
+                                                width = strokePx * 0.65f,
+                                                cap = StrokeCap.Round
+                                            )
+                                        )
+                                    }
+                                    val rad = Math.toRadians(rotationAngle.toDouble())
+                                    val orbCenter = Offset(
+                                        x = centerOffset.x + (ringRadius * cos(rad)).toFloat(),
+                                        y = centerOffset.y + (ringRadius * sin(rad)).toFloat()
+                                    )
+                                    drawCircle(
+                                        color = Color.White,
+                                        radius = (strokePx * 0.85f).coerceAtLeast(2.2f),
+                                        center = orbCenter
+                                    )
+                                }
+                            }
                         }
                     }
                 } else {
@@ -532,7 +830,7 @@ private fun RailIconButton(
                     .width(4.dp)
                     .height(pillHeight)
                     .clip(RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp))
-                    .background(Color.White)
+                    .background(CordlyTextPrimary)
             )
         }
 

@@ -10,13 +10,20 @@ import android.net.Uri
 import android.os.Build
 import android.util.Base64
 import android.util.LruCache
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
@@ -24,8 +31,11 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 object ImageEncodingHelper {
 
@@ -297,12 +307,216 @@ fun rememberFileImageBitmap(filePath: String?, version: Long): ImageBitmap? {
 }
 
 @Composable
+fun PresetBannerCanvas(
+    preset: ProfileBannerPreset,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val primary = preset.colors.getOrElse(0) { Color(0xFF0C05AB) }
+        val mid = preset.colors.getOrElse(1) { Color(0xFF5865F2) }
+        val accent = preset.colors.getOrElse(2) { Color(0xFF22D3EE) }
+
+        drawRect(
+            brush = Brush.linearGradient(
+                colors = listOf(primary, mid, accent),
+                start = Offset(0f, 0f),
+                end = Offset(w, h)
+            )
+        )
+
+        when (preset.pattern) {
+            BannerPatternType.DISCORD_SPLASH -> {
+                drawCircle(
+                    color = accent.copy(alpha = 0.25f),
+                    radius = h * 0.65f,
+                    center = Offset(w * 0.85f, h * 0.2f)
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.14f),
+                    radius = h * 0.45f,
+                    center = Offset(w * 0.14f, h * 0.88f)
+                )
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.18f),
+                    radius = h * 0.55f,
+                    center = Offset(w * 0.82f, h * 0.25f),
+                    style = Stroke(width = 2.5f)
+                )
+            }
+            BannerPatternType.HEX_CYBER -> {
+                val r = (min(w, h) * 0.24f).coerceAtLeast(16f)
+                val dx = r * 1.65f
+                val dy = r * 1.45f
+                var row = 0
+                var y = r * 0.5f
+                while (y < h + r) {
+                    var x = if (row % 2 == 0) r * 0.6f else r * 0.6f + dx * 0.5f
+                    while (x < w + r) {
+                        val hexPath = Path().apply {
+                            for (i in 0..5) {
+                                val angle = (60 * i - 30) * PI / 180.0
+                                val px = x + (r * 0.84f) * cos(angle).toFloat()
+                                val py = y + (r * 0.84f) * sin(angle).toFloat()
+                                if (i == 0) moveTo(px, py) else lineTo(px, py)
+                            }
+                            close()
+                        }
+                        drawPath(
+                            path = hexPath,
+                            color = accent.copy(alpha = 0.34f),
+                            style = Stroke(width = 1.8f)
+                        )
+                        x += dx
+                    }
+                    y += dy
+                    row++
+                }
+            }
+            BannerPatternType.AURORA_WAVE -> {
+                for (waveIdx in 0..2) {
+                    val baseY = h * (0.35f + waveIdx * 0.2f)
+                    val wavePath = Path().apply {
+                        moveTo(0f, h)
+                        lineTo(0f, baseY)
+                        cubicTo(
+                            w * 0.3f, baseY - h * 0.35f,
+                            w * 0.68f, baseY + h * 0.32f,
+                            w, baseY - h * 0.12f
+                        )
+                        lineTo(w, h)
+                        close()
+                    }
+                    drawPath(
+                        path = wavePath,
+                        color = if (waveIdx % 2 == 0) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.14f)
+                    )
+                }
+            }
+            BannerPatternType.PRISM_SHARDS -> {
+                val shards = listOf(
+                    Triple(0.18f, 0.35f, 0.26f),
+                    Triple(0.48f, 0.62f, 0.34f),
+                    Triple(0.78f, 0.32f, 0.30f),
+                    Triple(0.90f, 0.78f, 0.22f)
+                )
+                shards.forEachIndexed { idx, (cxF, cyF, sizeF) ->
+                    val cx = w * cxF
+                    val cy = h * cyF
+                    val d = min(w, h) * sizeF
+                    val diamond = Path().apply {
+                        moveTo(cx, cy - d)
+                        lineTo(cx + d * 0.8f, cy)
+                        lineTo(cx, cy + d)
+                        lineTo(cx - d * 0.8f, cy)
+                        close()
+                    }
+                    rotate(degrees = (idx * 22f) - 18f, pivot = Offset(cx, cy)) {
+                        drawPath(diamond, color = Color.White.copy(alpha = 0.16f))
+                        drawPath(diamond, color = accent.copy(alpha = 0.52f), style = Stroke(width = 2f))
+                    }
+                }
+            }
+            BannerPatternType.SUNSET_RAYS -> {
+                val sunCenter = Offset(w * 0.75f, h * 0.85f)
+                drawCircle(
+                    color = accent.copy(alpha = 0.55f),
+                    radius = h * 0.45f,
+                    center = sunCenter
+                )
+                for (i in 0..8) {
+                    val angle = (-175f + i * 21f) * PI / 180.0
+                    val endX = sunCenter.x + w * 0.9f * cos(angle).toFloat()
+                    val endY = sunCenter.y + w * 0.9f * sin(angle).toFloat()
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.16f),
+                        start = sunCenter,
+                        end = Offset(endX, endY),
+                        strokeWidth = 6f
+                    )
+                }
+            }
+            BannerPatternType.SAKURA_PETALS -> {
+                val petals = listOf(
+                    Offset(0.15f, 0.25f), Offset(0.32f, 0.68f), Offset(0.52f, 0.30f),
+                    Offset(0.70f, 0.72f), Offset(0.84f, 0.26f), Offset(0.92f, 0.58f)
+                )
+                petals.forEachIndexed { idx, p ->
+                    val cx = w * p.x
+                    val cy = h * p.y
+                    val r = min(w, h) * 0.14f
+                    rotate(degrees = idx * 35f, pivot = Offset(cx, cy)) {
+                        drawOval(
+                            color = Color.White.copy(alpha = 0.26f),
+                            topLeft = Offset(cx - r, cy - r * 0.52f),
+                            size = androidx.compose.ui.geometry.Size(r * 2f, r)
+                        )
+                    }
+                }
+            }
+            BannerPatternType.MATRIX_GRID -> {
+                val step = 28f
+                var x = step
+                while (x < w) {
+                    drawLine(
+                        color = accent.copy(alpha = 0.22f),
+                        start = Offset(x, 0f),
+                        end = Offset(x, h),
+                        strokeWidth = 1.2f
+                    )
+                    x += step
+                }
+                var y = step
+                while (y < h) {
+                    drawLine(
+                        color = accent.copy(alpha = 0.22f),
+                        start = Offset(0f, y),
+                        end = Offset(w, y),
+                        strokeWidth = 1.2f
+                    )
+                    y += step
+                }
+                drawCircle(
+                    color = accent.copy(alpha = 0.35f),
+                    radius = h * 0.42f,
+                    center = Offset(w * 0.8f, h * 0.5f),
+                    style = Stroke(width = 3f)
+                )
+            }
+            BannerPatternType.NEBULA_STARS -> {
+                val stars = listOf(
+                    Triple(0.12f, 0.28f, 3.2f), Triple(0.24f, 0.72f, 2.5f),
+                    Triple(0.38f, 0.20f, 4.0f), Triple(0.54f, 0.55f, 3.0f),
+                    Triple(0.66f, 0.25f, 4.5f), Triple(0.78f, 0.74f, 3.5f),
+                    Triple(0.89f, 0.36f, 5.0f), Triple(0.45f, 0.80f, 2.5f)
+                )
+                stars.forEach { (xf, yf, rad) ->
+                    val cx = w * xf
+                    val cy = h * yf
+                    drawCircle(color = Color.White.copy(alpha = 0.85f), radius = rad, center = Offset(cx, cy))
+                    drawCircle(color = accent.copy(alpha = 0.32f), radius = rad * 2.6f, center = Offset(cx, cy))
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun CordlyRemoteOrDataImage(
     source: String?,
     contentDescription: String?,
     contentScale: ContentScale = ContentScale.Crop,
     modifier: Modifier = Modifier
 ) {
+    val bannerPreset = ProfileBannerCatalog.findBySource(source)
+    if (bannerPreset != null) {
+        PresetBannerCanvas(
+            preset = bannerPreset,
+            modifier = modifier
+        )
+        return
+    }
     val decodedBitmap = rememberDecodedImageBitmap(source)
     when {
         decodedBitmap != null -> {
