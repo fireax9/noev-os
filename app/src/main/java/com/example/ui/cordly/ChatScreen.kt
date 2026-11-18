@@ -34,10 +34,12 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AlternateEmail
+import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Tag
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -104,8 +106,11 @@ fun ChatScreen(
     onDeleteMessage: (messageId: String) -> Unit,
     onUserProfileClick: (userId: String, name: String, photoUrl: String?) -> Unit = { _, _, _ -> },
     onHeaderProfileClick: (() -> Unit)? = null,
+    onStartVoiceCall: (() -> Unit)? = null,
+    onStartVideoCall: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val strings = LocalAppStrings.current
     if (showBackButton) {
         BackHandler(onBack = onBack)
     }
@@ -210,6 +215,35 @@ fun ChatScreen(
                             )
                         }
                     }
+
+                    if (onStartVoiceCall != null) {
+                        IconButton(
+                            onClick = onStartVoiceCall,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("chat_voice_call_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Call,
+                                contentDescription = strings.voiceCallAction,
+                                tint = CordlyCyan
+                            )
+                        }
+                    }
+                    if (onStartVideoCall != null) {
+                        IconButton(
+                            onClick = onStartVideoCall,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("chat_video_call_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Videocam,
+                                contentDescription = strings.videoCallAction,
+                                tint = CordlyBlurple
+                            )
+                        }
+                    }
                 }
                 HorizontalDivider(color = CordlyDivider, thickness = 1.dp)
             }
@@ -235,8 +269,8 @@ fun ChatScreen(
                     if (messages.isEmpty()) {
                         EmptyPlaceholder(
                             icon = if (isDirectMessage) Icons.Rounded.AlternateEmail else Icons.Rounded.Tag,
-                            title = "Welcome to ${if (isDirectMessage) title else "#$title"}!",
-                            subtitle = "This is the start of your conversation. Say hello below.",
+                            title = "${strings.welcomeToChannelPrefix} ${if (isDirectMessage) title else "#$title"}!",
+                            subtitle = strings.startOfConversation,
                             modifier = Modifier.align(Alignment.Center)
                         )
                     } else {
@@ -287,7 +321,7 @@ fun ChatScreen(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Replying to ${target.senderName}: ${target.text}",
+                            text = "${strings.replyingToPrefix} ${target.senderName}: ${target.text}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = CordlyTextSecondary,
                             maxLines = 1,
@@ -327,7 +361,7 @@ fun ChatScreen(
                     onValueChange = { messageText = it },
                     placeholder = {
                         Text(
-                            text = if (isDirectMessage) "Message $title" else "Message #$title",
+                            text = if (isDirectMessage) "${strings.messageHintPrefix} $title" else "${strings.messageHintPrefix} #$title",
                             color = CordlyTextMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -513,12 +547,13 @@ private fun DiscordMessageRow(
             }
         }
 
+        val strings = LocalAppStrings.current
         DropdownMenu(
             expanded = showMenu,
             onDismissRequest = { showMenu = false }
         ) {
             DropdownMenuItem(
-                text = { Text("Reply") },
+                text = { Text(strings.replyAction) },
                 leadingIcon = {
                     Icon(Icons.AutoMirrored.Rounded.Reply, contentDescription = null)
                 },
@@ -529,7 +564,7 @@ private fun DiscordMessageRow(
             )
             if (isOwnMessage) {
                 DropdownMenuItem(
-                    text = { Text("Delete message", color = CordlyCrimson) },
+                    text = { Text(strings.deleteMessageAction, color = CordlyCrimson) },
                     leadingIcon = {
                         Icon(
                             Icons.Rounded.DeleteOutline,

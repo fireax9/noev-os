@@ -58,6 +58,9 @@ service cloud.firestore {
              (!('equippedProfileEffect' in data) || (data.equippedProfileEffect is string && data.equippedProfileEffect.size() >= 1 && data.equippedProfileEffect.size() <= 40)) &&
              (!('profileVideoData' in data) || data.profileVideoData == null || isValidVideoDataString(data.profileVideoData)) &&
              (!('rewardedFriendUids' in data) || (data.rewardedFriendUids is list && data.rewardedFriendUids.size() <= 200)) &&
+             (!('dailyClaimsCount' in data) || (data.dailyClaimsCount is int && data.dailyClaimsCount >= 0 && data.dailyClaimsCount <= 100000)) &&
+             (!('lastDailyClaimAtMs' in data) || (data.lastDailyClaimAtMs is int && data.lastDailyClaimAtMs >= 0)) &&
+             (!('channelRewardClaimed' in data) || data.channelRewardClaimed is bool) &&
              isValidTimestamp(data.createdAt) &&
              (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
     }
@@ -182,6 +185,42 @@ service cloud.firestore {
              (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
     }
 
+    function isValidCallSession(data) {
+      return data.callerId is string && data.callerId.size() >= 1 && data.callerId.size() <= 128 &&
+             data.callerName is string && data.callerName.size() >= 1 && data.callerName.size() <= 60 &&
+             (!('callerPhoto' in data) || data.callerPhoto == null || isValidMediaString(data.callerPhoto)) &&
+             (!('calleeId' in data) || data.calleeId == null || (data.calleeId is string && data.calleeId.size() <= 128)) &&
+             data.calleeName is string && data.calleeName.size() >= 1 && data.calleeName.size() <= 60 &&
+             (!('calleePhoto' in data) || data.calleePhoto == null || isValidMediaString(data.calleePhoto)) &&
+             data.participantIds is list && data.participantIds.size() >= 1 && data.participantIds.size() <= 25 &&
+             data.participantIds[0] is string &&
+             (data.callerId in data.participantIds) &&
+             data.targetType in ['dm', 'server'] &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             (!('channelName' in data) || data.channelName == null || (data.channelName is string && data.channelName.size() <= 40)) &&
+             data.callType in ['voice', 'video'] &&
+             data.status in ['ringing', 'active', 'ended', 'declined'] &&
+             (!('callerMuted' in data) || data.callerMuted is bool) &&
+             (!('calleeMuted' in data) || data.calleeMuted is bool) &&
+             (!('callerVideoOn' in data) || data.callerVideoOn is bool) &&
+             (!('calleeVideoOn' in data) || data.calleeVideoOn is bool) &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidCallStreamFrame(data) {
+      return isValidId(data.callId) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.participantIds is list && data.participantIds.size() >= 1 && data.participantIds.size() <= 25 &&
+             (data.senderId in data.participantIds) &&
+             (!('frameData' in data) || data.frameData == null || isValidMediaString(data.frameData)) &&
+             (data.audioLevel is int || data.audioLevel is float) && data.audioLevel >= 0 && data.audioLevel <= 1.0 &&
+             data.videoEnabled is bool &&
+             data.muted is bool &&
+             isValidTimestamp(data.updatedAt);
+    }
+
     // --- 1. Private User Profile (Owner-Only PII) ---
     match /users/{userId} {
       allow get, list: if isSignedIn() && request.auth.uid == userId;
@@ -196,7 +235,7 @@ service cloud.firestore {
                          'photoUrl', 'bannerUrl', 'customStatus',
                          'peyPoints', 'ownedFrames', 'equippedFrame',
                          'ownedProfileEffects', 'equippedProfileEffect', 'profileVideoData',
-                         'rewardedFriendUids',
+                         'rewardedFriendUids', 'dailyClaimsCount', 'lastDailyClaimAtMs', 'channelRewardClaimed',
                          'createdAt', 'updatedAt'
                        ]) &&
                        isValidUserPrivate(incoming());
@@ -212,7 +251,7 @@ service cloud.firestore {
                          'photoUrl', 'bannerUrl', 'customStatus',
                          'peyPoints', 'ownedFrames', 'equippedFrame',
                          'ownedProfileEffects', 'equippedProfileEffect', 'profileVideoData',
-                         'rewardedFriendUids',
+                         'rewardedFriendUids', 'dailyClaimsCount', 'lastDailyClaimAtMs', 'channelRewardClaimed',
                          'updatedAt'
                        ]) &&
                        isValidTimestamp(incoming().updatedAt);
@@ -485,6 +524,74 @@ service cloud.firestore {
                        isValidTimestamp(incoming().updatedAt);
 
       allow delete: if isSignedIn() && isValidId(inviteCode) && existing().ownerId == request.auth.uid;
+    }
+
+    // --- 8. Real-Time Voice & Video Calls ---
+    match /calls/{callId} {
+      allow get: if isSignedIn() && isValidId(callId) && resource != null && (request.auth.uid in existing().participantIds);
+      allow list: if isSignedIn() && (request.auth.uid in resource.data.participantIds);
+
+      allow create: if isSignedIn() &&
+                       isValidId(callId) &&
+                       incoming().callerId == request.auth.uid &&
+                       (request.auth.uid in incoming().participantIds) &&
+                       incoming().status in ['ringing', 'active'] &&
+                       incoming().keys().hasAll(['callerId', 'callerName', 'calleeName', 'participantIds', 'targetType', 'targetId', 'callType', 'status', 'createdAt']) &&
+                       incoming().keys().hasOnly([
+                         'callerId', 'callerName', 'callerPhoto', 'calleeId', 'calleeName', 'calleePhoto',
+                         'participantIds', 'targetType', 'targetId', 'channelName', 'callType', 'status',
+                         'callerMuted', 'calleeMuted', 'callerVideoOn', 'calleeVideoOn',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidCallSession(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(callId) &&
+                       isValidCallSession(incoming()) &&
+                       (request.auth.uid in existing().participantIds) &&
+                       incoming().callerId == existing().callerId &&
+                       incoming().participantIds == existing().participantIds &&
+                       incoming().targetType == existing().targetType &&
+                       incoming().targetId == existing().targetId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'status', 'callType', 'callerMuted', 'calleeMuted', 'callerVideoOn', 'calleeVideoOn', 'updatedAt'
+                       ]) &&
+                       isValidTimestamp(incoming().updatedAt);
+
+      allow delete: if isSignedIn() && isValidId(callId) && (request.auth.uid in existing().participantIds);
+
+      match /streams/{senderId} {
+        allow get: if isSignedIn() && isValidId(senderId) && resource != null && (request.auth.uid in existing().participantIds);
+        allow list: if isSignedIn() && (request.auth.uid in resource.data.participantIds);
+
+        allow create: if isSignedIn() &&
+                         isValidId(senderId) &&
+                         senderId == request.auth.uid &&
+                         incoming().senderId == request.auth.uid &&
+                         incoming().callId == callId &&
+                         (request.auth.uid in incoming().participantIds) &&
+                         exists(/databases/$(database)/documents/calls/$(callId)) &&
+                         (request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.participantIds) &&
+                         incoming().participantIds == get(/databases/$(database)/documents/calls/$(callId)).data.participantIds &&
+                         incoming().keys().hasAll(['callId', 'senderId', 'senderName', 'participantIds', 'audioLevel', 'videoEnabled', 'muted', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['callId', 'senderId', 'senderName', 'participantIds', 'frameData', 'audioLevel', 'videoEnabled', 'muted', 'updatedAt']) &&
+                         isValidCallStreamFrame(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(senderId) &&
+                         senderId == request.auth.uid &&
+                         existing().senderId == request.auth.uid &&
+                         incoming().senderId == existing().senderId &&
+                         incoming().callId == existing().callId &&
+                         incoming().participantIds == existing().participantIds &&
+                         isValidCallStreamFrame(incoming()) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'senderName', 'frameData', 'audioLevel', 'videoEnabled', 'muted', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() && isValidId(senderId) && (senderId == request.auth.uid || (request.auth.uid in existing().participantIds));
+      }
     }
   }
 }

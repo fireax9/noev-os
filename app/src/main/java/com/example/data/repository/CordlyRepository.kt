@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.R
 import com.example.data.OperationType
 import com.example.data.handleFirestoreError
+import com.example.data.model.CallSession
+import com.example.data.model.CallStreamFrame
 import com.example.data.model.Conversation
 import com.example.data.model.DirectMessage
 import com.example.data.model.Friendship
@@ -102,6 +104,9 @@ class CordlyRepository(
                     put("ownedProfileEffects", listOf("none"))
                     put("equippedProfileEffect", "none")
                     put("rewardedFriendUids", emptyList<String>())
+                    put("dailyClaimsCount", 0L)
+                    put("lastDailyClaimAtMs", 0L)
+                    put("channelRewardClaimed", false)
                     put("createdAt", FieldValue.serverTimestamp())
                     put("updatedAt", FieldValue.serverTimestamp())
                 }
@@ -182,6 +187,9 @@ class CordlyRepository(
                 ownedProfileEffects = ownedProfileEffects,
                 equippedProfileEffect = equippedProfileEffect,
                 profileVideoData = profileVideoData,
+                dailyClaimsCount = existingUser?.dailyClaimsCount ?: 0L,
+                lastDailyClaimAtMs = existingUser?.lastDailyClaimAtMs ?: 0L,
+                channelRewardClaimed = existingUser?.channelRewardClaimed ?: false,
                 createdAt = Timestamp.now(),
                 updatedAt = Timestamp.now()
             )
@@ -510,6 +518,78 @@ class CordlyRepository(
             throw e
         } catch (e: Exception) {
             false
+        }
+    }
+
+    suspend fun claimDailyPeyReward(nowMs: Long = System.currentTimeMillis()): Result<Long> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(
+                UserPrivate::class.java,
+                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+            ) ?: throw IllegalStateException("Profile not found")
+
+            val status = computeDailyRewardStatus(current, nowMs)
+            if (!status.isClaimable) {
+                val hours = status.remainingMs / 3_600_000L
+                val mins = (status.remainingMs % 3_600_000L) / 60_000L
+                return Result.failure(
+                    IllegalStateException("Daily reward unlocks in ${hours}h ${mins}m")
+                )
+            }
+
+            val nextBalance = current.peyPoints + status.nextRewardAmount
+            userRef.update(
+                mapOf(
+                    "peyPoints" to nextBalance,
+                    "dailyClaimsCount" to (current.dailyClaimsCount + 1L),
+                    "lastDailyClaimAtMs" to nowMs,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(status.nextRewardAmount)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun claimChannelNameReward(enteredName: String): Result<Long> {
+        val uid = requireUserId()
+        val cleanInput = enteredName.trim()
+        if (!cleanInput.equals(CREATOR_CHANNEL_NAME, ignoreCase = true)) {
+            return Result.failure(
+                IllegalArgumentException("Enter the exact channel name: $CREATOR_CHANNEL_NAME")
+            )
+        }
+        val userRef = db.collection("users").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+            if (current.channelRewardClaimed) {
+                return Result.failure(
+                    IllegalStateException("Channel bonus ($CREATOR_CHANNEL_NAME) already claimed!")
+                )
+            }
+            val nextBalance = current.peyPoints + CHANNEL_REWARD_PEY_POINTS
+            userRef.update(
+                mapOf(
+                    "peyPoints" to nextBalance,
+                    "channelRewardClaimed" to true,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(CHANNEL_REWARD_PEY_POINTS)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
         }
     }
 
@@ -1129,6 +1209,217 @@ class CordlyRepository(
         }
     }
 
+    // --- Real-Time Voice & Video Calls ---
+
+    fun observeActiveCalls(uid: String): Flow<List<CallSession>> = flow {
+        val path = "calls"
+        emitAll(
+            db.collection(path)
+                .whereArrayContains("participantIds", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CallSession::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .filter { it.status == "ringing" || it.status == "active" }
+                        .sortedByDescending { it.updatedAt ?: it.createdAt ?: Timestamp(0, 0) }
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, uid)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun startCall(
+        caller: UserPrivate,
+        targetType: String,
+        targetId: String,
+        channelName: String?,
+        calleeId: String?,
+        calleeName: String,
+        calleePhoto: String?,
+        callType: String,
+        participantIds: List<String>
+    ): Result<CallSession> {
+        val uid = requireUserId()
+        val callRef = db.collection("calls").document()
+        val cleanParticipants = (participantIds + uid).distinct().take(25)
+        val initialStatus = if (targetType == "server") "active" else "ringing"
+        val isVideo = callType == "video"
+
+        return try {
+            val payload = buildMap<String, Any> {
+                put("callerId", uid)
+                put("callerName", caller.displayName.take(60).ifBlank { "neov user" })
+                if (!caller.photoUrl.isNullOrBlank()) put("callerPhoto", caller.photoUrl.take(120000))
+                if (!calleeId.isNullOrBlank()) put("calleeId", calleeId)
+                put("calleeName", calleeName.take(60).ifBlank { "neov call" })
+                if (!calleePhoto.isNullOrBlank()) put("calleePhoto", calleePhoto.take(120000))
+                put("participantIds", cleanParticipants)
+                put("targetType", targetType)
+                put("targetId", targetId.take(128))
+                if (!channelName.isNullOrBlank()) put("channelName", channelName.take(40))
+                put("callType", callType)
+                put("status", initialStatus)
+                put("callerMuted", false)
+                put("calleeMuted", false)
+                put("callerVideoOn", isVideo)
+                put("calleeVideoOn", false)
+                put("createdAt", FieldValue.serverTimestamp())
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
+            callRef.set(payload).await()
+            val created = CallSession(
+                id = callRef.id,
+                callerId = uid,
+                callerName = caller.displayName,
+                callerPhoto = caller.photoUrl,
+                calleeId = calleeId,
+                calleeName = calleeName,
+                calleePhoto = calleePhoto,
+                participantIds = cleanParticipants,
+                targetType = targetType,
+                targetId = targetId,
+                channelName = channelName,
+                callType = callType,
+                status = initialStatus,
+                callerMuted = false,
+                calleeMuted = false,
+                callerVideoOn = isVideo,
+                calleeVideoOn = false,
+                createdAt = Timestamp.now(),
+                updatedAt = Timestamp.now()
+            )
+            Result.success(created)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, callRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun answerCall(callId: String, videoOn: Boolean): Result<Unit> {
+        requireUserId()
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            callRef.update(
+                mapOf(
+                    "status" to "active",
+                    "calleeVideoOn" to videoOn,
+                    "calleeMuted" to false,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun endOrDeclineCall(callId: String, status: String): Result<Unit> {
+        requireUserId()
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            callRef.update(
+                mapOf(
+                    "status" to status,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateCallMediaState(
+        callId: String,
+        isCaller: Boolean,
+        muted: Boolean,
+        videoOn: Boolean
+    ): Result<Unit> {
+        requireUserId()
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            val payload = if (isCaller) {
+                mapOf(
+                    "callerMuted" to muted,
+                    "callerVideoOn" to videoOn,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            } else {
+                mapOf(
+                    "calleeMuted" to muted,
+                    "calleeVideoOn" to videoOn,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            }
+            callRef.update(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    fun observeCallStreams(callId: String, uid: String): Flow<List<CallStreamFrame>> = flow {
+        val path = "calls/$callId/streams"
+        emitAll(
+            db.collection("calls").document(callId).collection("streams")
+                .whereArrayContains("participantIds", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CallStreamFrame::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, uid)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun publishCallStreamFrame(
+        callId: String,
+        sender: UserPrivate,
+        participantIds: List<String>,
+        frameData: String?,
+        audioLevel: Double,
+        videoEnabled: Boolean,
+        muted: Boolean
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        val streamRef = db.collection("calls").document(callId)
+            .collection("streams").document(uid)
+        try {
+            val payload = buildMap<String, Any> {
+                put("callId", callId)
+                put("senderId", uid)
+                put("senderName", sender.displayName.take(60).ifBlank { "User" })
+                put("participantIds", participantIds)
+                if (!frameData.isNullOrBlank()) {
+                    put("frameData", frameData.take(120000))
+                }
+                put("audioLevel", audioLevel.coerceIn(0.0, 1.0))
+                put("videoEnabled", videoEnabled)
+                put("muted", muted)
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
+            streamRef.set(payload).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Transient stream frame drops should not interrupt active calls
+        }
+    }
+
     private fun handleFlowError(error: Throwable, op: OperationType, path: String, expectedUid: String) {
         val firestoreError = generateSequence(error) { it.cause }
             .filterIsInstance<FirebaseFirestoreException>()
@@ -1140,9 +1431,53 @@ class CordlyRepository(
         }
     }
 
+    data class DailyRewardStatus(
+        val isClaimable: Boolean,
+        val nextRewardAmount: Long,
+        val remainingMs: Long,
+        val claimsCompleted: Long
+    )
+
     companion object {
         const val INITIAL_PEY_POINTS = 200L
         const val FRIEND_REWARD_PEY_POINTS = 200L
+        const val DAILY_FIRST_PHASE_PEY = 100L
+        const val DAILY_SUBSEQUENT_PEY = 50L
+        const val CHANNEL_REWARD_PEY_POINTS = 200L
+        const val CREATOR_CHANNEL_NAME = "fire ax9"
+        const val ONE_DAY_MS = 24L * 60L * 60L * 1000L
+
+        fun computeDailyRewardStatus(
+            profile: UserPrivate?,
+            nowMs: Long = System.currentTimeMillis()
+        ): DailyRewardStatus {
+            if (profile == null) {
+                return DailyRewardStatus(
+                    isClaimable = false,
+                    nextRewardAmount = DAILY_FIRST_PHASE_PEY,
+                    remainingMs = ONE_DAY_MS,
+                    claimsCompleted = 0L
+                )
+            }
+            val nextAmount = if (profile.dailyClaimsCount < 2L) {
+                DAILY_FIRST_PHASE_PEY
+            } else {
+                DAILY_SUBSEQUENT_PEY
+            }
+            val anchorMs = when {
+                profile.lastDailyClaimAtMs > 0L -> profile.lastDailyClaimAtMs
+                profile.createdAt != null -> profile.createdAt.toDate().time
+                else -> nowMs
+            }
+            val unlockAtMs = anchorMs + ONE_DAY_MS
+            val remaining = (unlockAtMs - nowMs).coerceAtLeast(0L)
+            return DailyRewardStatus(
+                isClaimable = remaining == 0L,
+                nextRewardAmount = nextAmount,
+                remainingMs = remaining,
+                claimsCompleted = profile.dailyClaimsCount
+            )
+        }
 
         fun deterministicPairId(uidA: String, uidB: String): String {
             return if (uidA <= uidB) "${uidA}_${uidB}" else "${uidB}_${uidA}"

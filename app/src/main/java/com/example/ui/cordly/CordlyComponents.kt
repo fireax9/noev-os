@@ -92,11 +92,11 @@ fun statusColor(status: String): Color = when (status) {
     else -> CordlyTextMuted
 }
 
-fun statusLabel(status: String): String = when (status) {
-    "online" -> "Online"
-    "idle" -> "Idle"
-    "dnd" -> "Do Not Disturb"
-    else -> "Offline"
+fun statusLabel(status: String, strings: AppStrings = EnglishStrings): String = when (status) {
+    "online" -> strings.statusOnline
+    "idle" -> strings.statusIdle
+    "dnd" -> strings.statusDnd
+    else -> strings.statusOffline
 }
 
 fun parseHexColor(hex: String, fallback: Color = CordlyBlurple): Color {
@@ -403,6 +403,7 @@ fun ServerRail(
     onJoinServerClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val strings = LocalAppStrings.current
     val isHomeSelected = activeDestination is ActiveDestination.Home
 
     Column(
@@ -425,7 +426,7 @@ fun ServerRail(
         ) {
             Icon(
                 imageVector = Icons.Rounded.Forum,
-                contentDescription = "Direct Messages and Friends",
+                contentDescription = strings.messagesTab,
                 tint = if (isHomeSelected) Color.White else CordlyTextSecondary,
                 modifier = Modifier.size(24.dp)
             )
@@ -474,7 +475,7 @@ fun ServerRail(
             item {
                 RailActionButton(
                     icon = Icons.Rounded.Add,
-                    contentDescription = "Create Server",
+                    contentDescription = strings.createServerTitle,
                     tint = CordlyEmerald,
                     testTag = "rail_create_server_button",
                     onClick = onCreateServerClick
@@ -484,7 +485,7 @@ fun ServerRail(
             item {
                 RailActionButton(
                     icon = Icons.Rounded.Explore,
-                    contentDescription = "Join Server by Name",
+                    contentDescription = strings.joinServerTitle,
                     tint = CordlyCyan,
                     testTag = "rail_join_server_button",
                     onClick = onJoinServerClick
@@ -609,6 +610,7 @@ fun UserDockBar(
     onSignOutClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val strings = LocalAppStrings.current
     Surface(
         color = CordlyRailBg.copy(alpha = 0.92f),
         border = BorderStroke(1.dp, CordlyDivider.copy(alpha = 0.75f)),
@@ -659,7 +661,7 @@ fun UserDockBar(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Stars,
-                                contentDescription = "P E Y Shop",
+                                contentDescription = strings.tabPeyShop,
                                 tint = CordlyAmber,
                                 modifier = Modifier.size(12.dp)
                             )
@@ -674,7 +676,7 @@ fun UserDockBar(
                     }
                     Text(
                         text = profile?.customStatus?.takeIf { it.isNotBlank() }
-                            ?: statusLabel(profile?.status ?: "online"),
+                            ?: statusLabel(profile?.status ?: "online", strings),
                         style = MaterialTheme.typography.labelSmall,
                         color = CordlyTextSecondary,
                         maxLines = 1,
@@ -690,7 +692,7 @@ fun UserDockBar(
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Settings,
-                    contentDescription = "Settings, Wallpaper, and P E Y Shop",
+                    contentDescription = strings.settingsTitle,
                     tint = CordlyTextSecondary
                 )
             }
@@ -702,7 +704,7 @@ fun UserDockBar(
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Rounded.Logout,
-                    contentDescription = "Sign out",
+                    contentDescription = strings.signOutButton,
                     tint = CordlyCrimson
                 )
             }

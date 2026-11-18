@@ -3,6 +3,8 @@ package com.example.ui.cordly
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.model.CallSession
+import com.example.data.model.CallStreamFrame
 import com.example.data.model.Conversation
 import com.example.data.model.DirectMessage
 import com.example.data.model.Friendship
@@ -77,6 +79,9 @@ class CordlyViewModel(
 
     private val _profileViewerTarget = MutableStateFlow<ProfileViewerTarget?>(null)
     val profileViewerTarget: StateFlow<ProfileViewerTarget?> = _profileViewerTarget.asStateFlow()
+
+    private val _joinedCallId = MutableStateFlow<String?>(null)
+    val joinedCallId: StateFlow<String?> = _joinedCallId.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -162,6 +167,24 @@ class CordlyViewModel(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+
+    val activeCalls: StateFlow<List<CallSession>> = repository.observeActiveCalls(currentUserId)
+        .catch { error ->
+            Log.w(TAG, "Calls observer error", error)
+            emit(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val callStreams: StateFlow<List<CallStreamFrame>> = _joinedCallId
+        .flatMapLatest { callId ->
+            if (callId.isNullOrBlank()) {
+                flowOf(emptyList())
+            } else {
+                repository.observeCallStreams(callId, currentUserId)
+                    .catch { emit(emptyList()) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
     fun selectHome(tabIndex: Int? = null) {
         _destination.value = ActiveDestination.Home
@@ -565,6 +588,159 @@ class CordlyViewModel(
 
     fun closeProfileViewer() {
         _profileViewerTarget.value = null
+    }
+
+    fun claimDailyReward() {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.claimDailyPeyReward()
+                .onSuccess { awarded ->
+                    _snackbarMessage.value = "Daily Reward Claimed: +$awarded P E Y!"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Daily reward is not ready yet."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun claimChannelReward(enteredName: String) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.claimChannelNameReward(enteredName)
+                .onSuccess { awarded ->
+                    _snackbarMessage.value = "fire ax9 Verified! +$awarded P E Y added!"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not claim channel reward."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun startDirectCall(
+        calleeId: String,
+        calleeName: String,
+        calleePhoto: String?,
+        conversationId: String,
+        callType: String
+    ) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        if (calleeId.isBlank()) return
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.startCall(
+                caller = profile,
+                targetType = "dm",
+                targetId = conversationId,
+                channelName = null,
+                calleeId = calleeId,
+                calleeName = calleeName,
+                calleePhoto = calleePhoto,
+                callType = callType,
+                participantIds = listOf(currentUserId, calleeId)
+            )
+                .onSuccess { call ->
+                    _joinedCallId.value = call.id
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not start call."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun startOrJoinServerCall(
+        server: Server,
+        channelName: String,
+        callType: String
+    ) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        val existingServerCall = activeCalls.value.firstOrNull {
+            it.targetType == "server" && it.targetId == server.id
+        }
+        if (existingServerCall != null) {
+            _joinedCallId.value = existingServerCall.id
+            return
+        }
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.startCall(
+                caller = profile,
+                targetType = "server",
+                targetId = server.id,
+                channelName = channelName,
+                calleeId = server.id,
+                calleeName = "${server.name} • #$channelName",
+                calleePhoto = server.iconUrl,
+                callType = callType,
+                participantIds = server.memberUids
+            )
+                .onSuccess { call ->
+                    _joinedCallId.value = call.id
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not start voice/video call."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun answerCall(call: CallSession, withVideo: Boolean) {
+        viewModelScope.launch {
+            repository.answerCall(call.id, withVideo)
+                .onSuccess {
+                    _joinedCallId.value = call.id
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not answer call."
+                }
+        }
+    }
+
+    fun joinOngoingCall(call: CallSession) {
+        _joinedCallId.value = call.id
+    }
+
+    fun endOrDeclineCall(call: CallSession, newStatus: String) {
+        if (_joinedCallId.value == call.id) {
+            _joinedCallId.value = null
+        }
+        viewModelScope.launch {
+            repository.endOrDeclineCall(call.id, newStatus)
+        }
+    }
+
+    fun leaveCurrentCallOnly() {
+        _joinedCallId.value = null
+    }
+
+    fun updateCallMediaState(call: CallSession, muted: Boolean, videoOn: Boolean) {
+        val isCaller = call.callerId == currentUserId
+        viewModelScope.launch {
+            repository.updateCallMediaState(call.id, isCaller, muted, videoOn)
+        }
+    }
+
+    fun publishCallStreamSample(
+        call: CallSession,
+        frameData: String?,
+        audioLevel: Double,
+        videoEnabled: Boolean,
+        muted: Boolean
+    ) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        viewModelScope.launch {
+            repository.publishCallStreamFrame(
+                callId = call.id,
+                sender = profile,
+                participantIds = call.participantIds,
+                frameData = frameData,
+                audioLevel = audioLevel,
+                videoEnabled = videoEnabled,
+                muted = muted
+            )
+        }
     }
 
     private fun unwrapError(error: Throwable, fallback: String): String {

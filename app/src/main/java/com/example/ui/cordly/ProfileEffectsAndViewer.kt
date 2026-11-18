@@ -257,6 +257,7 @@ fun DiscordProfileSheetDialog(
     onMessageUser: (() -> Unit)?,
     onDismiss: () -> Unit
 ) {
+    val strings = LocalAppStrings.current
     val context = LocalContext.current
     val uid = targetProfile?.userId?.takeIf { it.isNotBlank() } ?: fallbackUserId
     val displayName = targetProfile?.displayName?.takeIf { it.isNotBlank() } ?: fallbackName
@@ -498,13 +499,13 @@ fun DiscordProfileSheetDialog(
 
                             if (!friendCode.isNullOrBlank()) {
                                 Text(
-                                    text = "$friendCode • ${statusLabel(status)}",
+                                    text = "$friendCode • ${statusLabel(status, strings)}",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = CordlyCyan
                                 )
                             } else {
                                 Text(
-                                    text = statusLabel(status),
+                                    text = statusLabel(status, strings),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = statusColor(status)
                                 )
@@ -523,7 +524,7 @@ fun DiscordProfileSheetDialog(
                                     modifier = Modifier.padding(14.dp)
                                 ) {
                                     Text(
-                                        text = "ABOUT MEMBER",
+                                        text = strings.aboutMember,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = CordlyTextSecondary
                                     )
@@ -540,7 +541,7 @@ fun DiscordProfileSheetDialog(
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Text(
-                                            text = "Profile Intro",
+                                            text = strings.profileIntroLabel,
                                             style = MaterialTheme.typography.labelMedium,
                                             color = CordlyTextSecondary
                                         )
@@ -574,7 +575,7 @@ fun DiscordProfileSheetDialog(
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Send Direct Message")
+                                    Text(strings.sendDirectMessageButton)
                                 }
                             }
                         }

@@ -23,6 +23,9 @@ data class UserPrivate(
     val equippedProfileEffect: String = "none",
     val profileVideoData: String? = null,
     val rewardedFriendUids: List<String> = emptyList(),
+    val dailyClaimsCount: Long = 0L,
+    val lastDailyClaimAtMs: Long = 0L,
+    val channelRewardClaimed: Boolean = false,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -145,5 +148,42 @@ data class ServerMessage(
     val replyToText: String? = null,
     val edited: Boolean? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class CallSession(
+    @DocumentId val id: String = "",
+    val callerId: String = "",
+    val callerName: String = "",
+    val callerPhoto: String? = null,
+    val calleeId: String? = null,
+    val calleeName: String = "",
+    val calleePhoto: String? = null,
+    val participantIds: List<String> = emptyList(),
+    val targetType: String = "dm", // "dm" | "server"
+    val targetId: String = "",
+    val channelName: String? = null,
+    val callType: String = "voice", // "voice" | "video"
+    val status: String = "ringing", // "ringing" | "active" | "ended" | "declined"
+    val callerMuted: Boolean = false,
+    val calleeMuted: Boolean = false,
+    val callerVideoOn: Boolean = false,
+    val calleeVideoOn: Boolean = false,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class CallStreamFrame(
+    @DocumentId val id: String = "",
+    val callId: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
+    val participantIds: List<String> = emptyList(),
+    val frameData: String? = null,
+    val audioLevel: Double = 0.0,
+    val videoEnabled: Boolean = false,
+    val muted: Boolean = false,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

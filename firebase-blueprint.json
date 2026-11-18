@@ -20,6 +20,9 @@
         "equippedProfileEffect": { "type": "string", "description": "Currently active 5s video profile effect ID" },
         "profileVideoData": { "type": "string", "description": "Optional compressed 5-second MP4 data URI for custom profile effect" },
         "rewardedFriendUids": { "type": "array", "description": "Friend UIDs already rewarded with +200 P E Y" },
+        "dailyClaimsCount": { "type": "integer", "description": "Number of daily P E Y rewards claimed (first 2 give +100, subsequent give +50)" },
+        "lastDailyClaimAtMs": { "type": "integer", "description": "Epoch milliseconds of last daily P E Y claim" },
+        "channelRewardClaimed": { "type": "boolean", "description": "Whether the one-time +200 P E Y fire ax9 channel bonus was claimed" },
         "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
         "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
@@ -186,6 +189,49 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["serverId", "channelName", "memberUids", "senderId", "senderName", "text", "createdAt"]
+    },
+    "CallSession": {
+      "title": "CallSession",
+      "description": "Voice or video call signaling and participant state for DMs or Server channels.",
+      "type": "object",
+      "properties": {
+        "callerId": { "type": "string" },
+        "callerName": { "type": "string" },
+        "callerPhoto": { "type": "string" },
+        "calleeId": { "type": "string" },
+        "calleeName": { "type": "string" },
+        "calleePhoto": { "type": "string" },
+        "participantIds": { "type": "array", "description": "Bounded list of call participant UIDs (1..25)" },
+        "targetType": { "type": "string", "enum": ["dm", "server"] },
+        "targetId": { "type": "string" },
+        "channelName": { "type": "string" },
+        "callType": { "type": "string", "enum": ["voice", "video"] },
+        "status": { "type": "string", "enum": ["ringing", "active", "ended", "declined"] },
+        "callerMuted": { "type": "boolean" },
+        "calleeMuted": { "type": "boolean" },
+        "callerVideoOn": { "type": "boolean" },
+        "calleeVideoOn": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["callerId", "callerName", "calleeName", "participantIds", "targetType", "targetId", "callType", "status", "createdAt"]
+    },
+    "CallStreamFrame": {
+      "title": "CallStreamFrame",
+      "description": "Live participant audio meter and throttled camera preview frame inside an active call.",
+      "type": "object",
+      "properties": {
+        "callId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "participantIds": { "type": "array", "description": "Denormalized list of call participant UIDs" },
+        "frameData": { "type": "string" },
+        "audioLevel": { "type": "number" },
+        "videoEnabled": { "type": "boolean" },
+        "muted": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["callId", "senderId", "senderName", "participantIds", "audioLevel", "videoEnabled", "muted", "updatedAt"]
     }
   },
   "firestore": {
@@ -224,6 +270,14 @@
     "/servers/{serverId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ServerMessage" },
       "description": "Real-time messages within a server channel."
+    },
+    "/calls/{callId}": {
+      "schema": { "$ref": "#/entities/CallSession" },
+      "description": "Real-time voice and video calls between friends or server members."
+    },
+    "/calls/{callId}/streams/{senderId}": {
+      "schema": { "$ref": "#/entities/CallStreamFrame" },
+      "description": "Live participant audio amplitude and camera frames during an active call."
     }
   }
 }

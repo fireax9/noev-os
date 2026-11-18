@@ -15,6 +15,16 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.data.repository.CordlyRepository
 import com.example.ui.auth.AuthScreen
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import com.example.ui.cordly.AppAppearanceStore
+import com.example.ui.cordly.AppLanguageManager
+import com.example.ui.cordly.LocalAppStrings
+import com.example.ui.cordly.LocalOnLanguageSelected
+import com.example.ui.cordly.LocalSelectedLanguageCode
 import com.example.ui.cordly.CordlyHomeScreen
 import com.example.ui.cordly.CordlyViewModel
 import com.example.ui.theme.CordlyTheme
@@ -32,8 +42,28 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            CordlyTheme {
-                CordlyAppNavigation()
+            val context = LocalContext.current
+            var selectedLanguageCode by remember {
+                mutableStateOf(AppAppearanceStore.loadLanguageCode(context))
+            }
+            val appStrings = remember(selectedLanguageCode) {
+                AppLanguageManager.stringsFor(selectedLanguageCode)
+            }
+            val layoutDirection = remember(selectedLanguageCode) {
+                AppLanguageManager.layoutDirectionFor(selectedLanguageCode)
+            }
+
+            CompositionLocalProvider(
+                LocalAppStrings provides appStrings,
+                LocalSelectedLanguageCode provides selectedLanguageCode,
+                LocalOnLanguageSelected provides { newCode ->
+                    selectedLanguageCode = AppAppearanceStore.saveLanguageCode(context, newCode)
+                },
+                LocalLayoutDirection provides layoutDirection
+            ) {
+                CordlyTheme {
+                    CordlyAppNavigation()
+                }
             }
         }
     }

@@ -28,8 +28,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.automirrored.rounded.Login
+import androidx.compose.foundation.clickable
+import com.example.ui.cordly.AppLanguageManager
+import com.example.ui.cordly.LocalAppStrings
+import com.example.ui.cordly.LocalOnLanguageSelected
+import com.example.ui.cordly.LocalSelectedLanguageCode
+import com.example.ui.cordly.WorldLanguagePickerDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -203,9 +210,13 @@ fun AuthScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val credentialManager = remember(context) { CredentialManager.create(context) }
+    val strings = LocalAppStrings.current
+    val currentLanguageCode = LocalSelectedLanguageCode.current
+    val onLanguageSelected = LocalOnLanguageSelected.current
 
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showLanguagePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         delay(750)
@@ -223,7 +234,7 @@ fun AuthScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(CordlyRailBg, CordlyCanvasBg, Color(0xFF101325))
+                    colors = listOf(Color.Black, Color(0xFF060609), Color.Black)
                 )
             )
             .statusBarsPadding()
@@ -243,11 +254,46 @@ fun AuthScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                Row(
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 10.dp)
+                ) {
+                    Surface(
+                        color = CordlyCardSurface,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, CordlyCyan.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { showLanguagePicker = true }
+                            .testTag("auth_language_picker_button")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Language,
+                                contentDescription = strings.tabLanguages,
+                                tint = CordlyCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = AppLanguageManager.displayLabel(currentLanguageCode),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CordlyTextPrimary
+                            )
+                        }
+                    }
+                }
+
                 // Hero Artwork Card
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(210.dp)
                         .clip(RoundedCornerShape(26.dp))
                 ) {
                     AsyncImage(
@@ -263,7 +309,7 @@ fun AuthScreen(
                                 Brush.verticalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        CordlyCanvasBg.copy(alpha = 0.85f)
+                                        Color.Black.copy(alpha = 0.88f)
                                     )
                                 )
                             )
@@ -304,7 +350,7 @@ fun AuthScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "+200 P E Y WELCOME BONUS",
+                                    text = strings.welcomeBadge,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold
@@ -314,7 +360,7 @@ fun AuthScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(22.dp))
 
                 Text(
                     text = stringResource(id = R.string.app_name),
@@ -323,34 +369,34 @@ fun AuthScreen(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = stringResource(id = R.string.cordly_tagline),
+                    text = strings.tagline,
                     style = MaterialTheme.typography.bodyLarge,
                     color = CordlyTextSecondary,
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(22.dp))
 
                 // Feature Highlights
                 FeatureRow(
                     icon = Icons.Rounded.Forum,
                     tint = CordlyCyan,
-                    title = "Instant DMs & +200 P E Y Per Friend",
-                    subtitle = "Earn P E Y points on login and for every friend you add to unlock frames"
+                    title = strings.featureDmTitle,
+                    subtitle = strings.featureDmSubtitle
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 FeatureRow(
                     icon = Icons.Rounded.Groups,
                     tint = CordlyBlurple,
-                    title = "Custom Servers & Join by Name",
-                    subtitle = "Upload server icons and join your friends' servers simply by typing the name"
+                    title = strings.featureServerTitle,
+                    subtitle = strings.featureServerSubtitle
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 FeatureRow(
                     icon = Icons.Rounded.Lock,
                     tint = CordlyEmerald,
-                    title = "Private & Google-Verified",
-                    subtitle = "Secured with Google Sign-In and Firebase isolation"
+                    title = strings.featureSecureTitle,
+                    subtitle = strings.featureSecureSubtitle
                 )
             }
 
@@ -421,7 +467,7 @@ fun AuthScreen(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = "Signing in...",
+                            text = strings.signingIn,
                             style = MaterialTheme.typography.titleMedium
                         )
                     } else {
@@ -432,13 +478,24 @@ fun AuthScreen(
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = stringResource(id = R.string.sign_in_with_google),
+                            text = strings.signInWithGoogle,
                             style = MaterialTheme.typography.titleMedium
                         )
                     }
                 }
             }
         }
+    }
+
+    if (showLanguagePicker) {
+        WorldLanguagePickerDialog(
+            selectedCode = currentLanguageCode,
+            onSelectLanguage = { code ->
+                onLanguageSelected(code)
+                showLanguagePicker = false
+            },
+            onDismiss = { showLanguagePicker = false }
+        )
     }
 }
 

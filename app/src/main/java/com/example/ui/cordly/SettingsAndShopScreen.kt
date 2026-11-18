@@ -32,16 +32,28 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
+import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircleFilled
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.Stars
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.material.icons.rounded.Wallpaper
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import com.example.data.repository.CordlyRepository
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -114,6 +126,8 @@ fun SettingsAndShopDialog(
         clearBanner: Boolean,
         label: String
     ) -> Unit,
+    onClaimDailyReward: () -> Unit,
+    onClaimChannelReward: (String) -> Unit,
     onBuyFrame: (ProfileFrameItem) -> Unit,
     onEquipFrame: (String) -> Unit,
     onBuyProfileEffect: (ProfileVideoEffectItem, String?, Boolean) -> Unit,
@@ -124,6 +138,7 @@ fun SettingsAndShopDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val strings = LocalAppStrings.current
 
     var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
     var displayName by remember(profile?.userId) { mutableStateOf(profile?.displayName.orEmpty()) }
@@ -234,12 +249,12 @@ fun SettingsAndShopDialog(
                 ) {
                     Column {
                         Text(
-                            text = "neov chat Settings",
+                            text = strings.settingsTitle,
                             style = MaterialTheme.typography.titleLarge,
                             color = CordlyTextPrimary
                         )
                         Text(
-                            text = "${profile?.peyPoints ?: 200} P E Y Points Available",
+                            text = "${profile?.peyPoints ?: 200} ${strings.peyAvailableSuffix}",
                             style = MaterialTheme.typography.labelSmall,
                             color = CordlyAmber,
                             fontWeight = FontWeight.Bold
@@ -249,21 +264,21 @@ fun SettingsAndShopDialog(
                         onClick = onDismiss,
                         modifier = Modifier.minimumInteractiveComponentSize()
                     ) {
-                        Icon(Icons.Rounded.Close, contentDescription = "Close", tint = CordlyTextSecondary)
+                        Icon(Icons.Rounded.Close, contentDescription = strings.closeButton, tint = CordlyTextSecondary)
                     }
                 }
 
-                // Sub-Tabs: Settings & Appearance | P E Y Shop
+                // Sub-Tabs: Profile & Theme | P E Y Shop | World Languages
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(CordlyRailBg)
-                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                        .padding(start = 14.dp, end = 14.dp, bottom = 12.dp)
                 ) {
                     ModalTabButton(
                         icon = Icons.Rounded.Palette,
-                        label = "Profile & Theme",
+                        label = strings.tabProfileTheme,
                         selected = selectedTab == 0,
                         testTag = "settings_profile_tab",
                         onClick = { selectedTab = 0 },
@@ -271,18 +286,26 @@ fun SettingsAndShopDialog(
                     )
                     ModalTabButton(
                         icon = Icons.Rounded.ShoppingBag,
-                        label = "P E Y Shop",
+                        label = strings.tabPeyShop,
                         selected = selectedTab == 1,
                         testTag = "settings_shop_tab",
                         onClick = { selectedTab = 1 },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModalTabButton(
+                        icon = Icons.Rounded.Language,
+                        label = strings.tabLanguages,
+                        selected = selectedTab == 2,
+                        testTag = "settings_language_tab",
+                        onClick = { selectedTab = 2 },
                         modifier = Modifier.weight(1f)
                     )
                 }
 
                 HorizontalDivider(color = CordlyDivider)
 
-                if (selectedTab == 0) {
-                    SettingsProfileTab(
+                when (selectedTab) {
+                    0 -> SettingsProfileTab(
                         profile = profile,
                         displayName = displayName,
                         onDisplayNameChange = { displayName = it },
@@ -333,16 +356,18 @@ fun SettingsAndShopDialog(
                             onSignOut()
                         }
                     )
-                } else {
-                    PeyShopTab(
+                    1 -> PeyShopTab(
                         profile = profile,
                         isBusy = isBusy,
+                        onClaimDailyReward = onClaimDailyReward,
+                        onClaimChannelReward = onClaimChannelReward,
                         onBuyFrame = onBuyFrame,
                         onEquipFrame = onEquipFrame,
                         onBuyProfileEffect = onBuyProfileEffect,
                         onEquipProfileEffect = onEquipProfileEffect,
                         onPreviewOwnProfile = onPreviewOwnProfile
                     )
+                    else -> WorldLanguagesTab()
                 }
             }
         }
@@ -597,14 +622,15 @@ private fun SettingsProfileTab(
             }
         }
 
-        // App Background Wallpaper Selector (3 Provided Wallpapers + Default + Custom Photo)
+        // App Background Wallpaper Selector (Pure Black + 3 Provided Wallpapers + Custom Photo)
+        val strings = LocalAppStrings.current
         Text(
-            text = "App Background Wallpaper",
+            text = strings.backgroundTitle,
             style = MaterialTheme.typography.titleMedium,
             color = CordlyTextPrimary
         )
         Text(
-            text = "Pick one of the 3 studio gradients or upload your own wallpaper photo.",
+            text = strings.backgroundSubtitle,
             style = MaterialTheme.typography.labelSmall,
             color = CordlyTextSecondary
         )
@@ -654,7 +680,7 @@ private fun SettingsProfileTab(
                     if (customWallpaperBitmap != null) {
                         Image(
                             bitmap = customWallpaperBitmap,
-                            contentDescription = "Custom wallpaper",
+                            contentDescription = strings.yourPhoto,
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -670,13 +696,13 @@ private fun SettingsProfileTab(
                     ) {
                         Icon(
                             Icons.Rounded.AddPhotoAlternate,
-                            contentDescription = "Pick custom background image",
+                            contentDescription = strings.yourPhoto,
                             tint = CordlyCyan,
                             modifier = Modifier.size(26.dp)
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Your Photo",
+                            text = strings.yourPhoto,
                             style = MaterialTheme.typography.labelSmall,
                             color = Color.White
                         )
@@ -689,7 +715,7 @@ private fun SettingsProfileTab(
         OutlinedTextField(
             value = displayName,
             onValueChange = onDisplayNameChange,
-            label = { Text("Display Name") },
+            label = { Text(strings.displayNameLabel) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -697,8 +723,8 @@ private fun SettingsProfileTab(
         OutlinedTextField(
             value = customStatus,
             onValueChange = onCustomStatusChange,
-            label = { Text("Custom Status") },
-            placeholder = { Text("Playing ranked / Hanging out...") },
+            label = { Text(strings.customStatusLabel) },
+            placeholder = { Text(strings.customStatusPlaceholder) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -723,9 +749,16 @@ private fun SettingsProfileTab(
                         Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(color))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (key == "dnd") "DND" else statusLabel(key),
+                            text = when (key) {
+                                "online" -> strings.statusOnline
+                                "idle" -> strings.statusIdle
+                                "dnd" -> strings.statusDnd
+                                else -> strings.statusOffline
+                            },
                             style = MaterialTheme.typography.labelSmall,
-                            color = CordlyTextPrimary
+                            color = CordlyTextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -742,7 +775,7 @@ private fun SettingsProfileTab(
                 .height(48.dp)
                 .testTag("save_profile_settings_button")
         ) {
-            Text("Save Profile & Appearance")
+            Text(strings.saveProfileButton)
         }
 
         OutlinedButton(
@@ -756,7 +789,7 @@ private fun SettingsProfileTab(
         ) {
             Icon(Icons.Rounded.PlayCircleFilled, contentDescription = null, tint = CordlyCyan, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Preview Discord Profile & 5s Video", color = CordlyCyan)
+            Text(strings.previewProfileButton, color = CordlyCyan)
         }
 
         OutlinedButton(
@@ -767,7 +800,7 @@ private fun SettingsProfileTab(
         ) {
             Icon(Icons.AutoMirrored.Rounded.Logout, contentDescription = null, tint = CordlyCrimson, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Sign Out", color = CordlyCrimson)
+            Text(strings.signOutButton, color = CordlyCrimson)
         }
     }
 }
@@ -848,6 +881,8 @@ private fun WallpaperSwatchCard(
 private fun PeyShopTab(
     profile: UserPrivate?,
     isBusy: Boolean,
+    onClaimDailyReward: () -> Unit,
+    onClaimChannelReward: (String) -> Unit,
     onBuyFrame: (ProfileFrameItem) -> Unit,
     onEquipFrame: (String) -> Unit,
     onBuyProfileEffect: (ProfileVideoEffectItem, String?, Boolean) -> Unit,
@@ -856,10 +891,25 @@ private fun PeyShopTab(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    val strings = LocalAppStrings.current
 
     var shopSection by remember { mutableIntStateOf(0) } // 0 = 5s Profile Videos, 1 = Animated Frames
     var processingVideoError by remember { mutableStateOf<String?>(null) }
     var isProcessingVideo by remember { mutableStateOf(false) }
+    var channelNameInput by remember { mutableStateOf("") }
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(profile?.lastDailyClaimAtMs, profile?.createdAt) {
+        while (isActive) {
+            nowMs = System.currentTimeMillis()
+            delay(1000L)
+        }
+    }
+
+    val dailyStatus = remember(profile?.dailyClaimsCount, profile?.lastDailyClaimAtMs, profile?.createdAt, nowMs) {
+        CordlyRepository.computeDailyRewardStatus(profile, nowMs)
+    }
 
     val balance = profile?.peyPoints ?: 200L
     val ownedFrames = profile?.ownedFrames?.ifEmpty { listOf("none") } ?: listOf("none")
@@ -936,7 +986,7 @@ private fun PeyShopTab(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Earn +200 P E Y at sign-in and +200 P E Y for every new friend!",
+                            text = strings.shopRewardsTitle,
                             style = MaterialTheme.typography.labelSmall,
                             color = CordlyTextSecondary
                         )
@@ -960,6 +1010,169 @@ private fun PeyShopTab(
             }
         }
 
+        // Daily P E Y Reward Card (+100 P E Y first 2 days, then +50 P E Y every day)
+        item {
+            Surface(
+                color = CordlyCardSurface,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, if (dailyStatus.isClaimable) CordlyEmerald else CordlyDivider),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Surface(
+                        color = CordlyEmerald.copy(alpha = 0.16f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.CalendarMonth, contentDescription = null, tint = CordlyEmerald, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${strings.dailyRewardTitle} (+${dailyStatus.nextRewardAmount} P E Y)",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = CordlyTextPrimary,
+                            fontWeight = FontWeight.Bold
+                        )
+                        val hrs = dailyStatus.remainingMs / 3_600_000L
+                        val mins = (dailyStatus.remainingMs % 3_600_000L) / 60_000L
+                        val secs = (dailyStatus.remainingMs % 60_000L) / 1000L
+                        Text(
+                            text = if (dailyStatus.isClaimable) {
+                                if (dailyStatus.claimsCompleted < 2L) strings.dailyRewardFirstSub else strings.dailyRewardAfterSub
+                            } else {
+                                "${strings.nextClaimIn} ${String.format(java.util.Locale.US, "%02d:%02d:%02d", hrs, mins, secs)}"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (dailyStatus.isClaimable) CordlyEmerald else CordlyTextSecondary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = onClaimDailyReward,
+                        enabled = dailyStatus.isClaimable && !isBusy,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (dailyStatus.isClaimable) CordlyEmerald else CordlyElevatedSurface,
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.testTag("claim_daily_reward_button")
+                    ) {
+                        Text("${strings.claimNowButton} +${dailyStatus.nextRewardAmount}", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
+        // Creator Channel Name Copy Bonus Card (fire ax9 -> +200 P E Y)
+        item {
+            val alreadyClaimed = profile?.channelRewardClaimed == true
+            Surface(
+                color = CordlyCardSurface,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, if (alreadyClaimed) CordlyDivider else CordlyCyan.copy(alpha = 0.65f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            color = CordlyCyan.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.ContentCopy, contentDescription = null, tint = CordlyCyan, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = strings.channelRewardTitle,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = CordlyTextPrimary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = strings.channelRewardSubtitle,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CordlyTextSecondary
+                            )
+                        }
+                    }
+
+                    if (alreadyClaimed) {
+                        Surface(
+                            color = CordlyEmerald.copy(alpha = 0.18f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, CordlyEmerald)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = CordlyEmerald, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = strings.channelRewardClaimedLabel,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = CordlyEmerald
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(CordlyRepository.CREATOR_CHANNEL_NAME))
+                                channelNameInput = CordlyRepository.CREATOR_CHANNEL_NAME
+                                onClaimChannelReward(CordlyRepository.CREATOR_CHANNEL_NAME)
+                            },
+                            enabled = !isBusy,
+                            colors = ButtonDefaults.buttonColors(containerColor = CordlyCyan, contentColor = Color.Black),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("copy_fire_ax9_reward_button")
+                        ) {
+                            Icon(Icons.Rounded.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(strings.copyChannelNameButton, fontWeight = FontWeight.Bold)
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = channelNameInput,
+                                onValueChange = { channelNameInput = it },
+                                label = { Text(strings.channelNameInputLabel) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                onClick = { onClaimChannelReward(channelNameInput) },
+                                enabled = channelNameInput.trim().equals(CordlyRepository.CREATOR_CHANNEL_NAME, ignoreCase = true) && !isBusy,
+                                colors = ButtonDefaults.buttonColors(containerColor = CordlyAmber, contentColor = Color.Black),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.testTag("claim_channel_reward_button")
+                            ) {
+                                Text(strings.claimNowButton)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Shop Category Switcher: 5s Video Intros vs Animated Avatar Frames
         item {
             Row(
@@ -968,7 +1181,7 @@ private fun PeyShopTab(
             ) {
                 ModalTabButton(
                     icon = Icons.Rounded.VideoLibrary,
-                    label = "5s Video Effects",
+                    label = strings.shopVideosTab,
                     selected = shopSection == 0,
                     testTag = "shop_videos_tab",
                     onClick = { shopSection = 0 },
@@ -976,7 +1189,7 @@ private fun PeyShopTab(
                 )
                 ModalTabButton(
                     icon = Icons.Rounded.Stars,
-                    label = "Avatar Frames",
+                    label = strings.shopFramesTab,
                     selected = shopSection == 1,
                     testTag = "shop_frames_tab",
                     onClick = { shopSection = 1 },
@@ -1262,7 +1475,7 @@ private fun PeyShopTab(
                                     shape = RoundedCornerShape(10.dp),
                                     modifier = Modifier.testTag("buy_frame_${frame.id}")
                                 ) {
-                                    Text("Buy")
+                                    Text(strings.buyButton)
                                 }
                             }
                         }
@@ -1271,4 +1484,216 @@ private fun PeyShopTab(
             }
         }
     }
+}
+
+@Composable
+fun WorldLanguagesTab() {
+    val strings = LocalAppStrings.current
+    val selectedCode = LocalSelectedLanguageCode.current
+    val onLanguageSelected = LocalOnLanguageSelected.current
+
+    var query by remember { mutableStateOf("") }
+    val allLangs = remember { AppLanguageManager.allWorldLanguages }
+    val filteredLangs = remember(query, allLangs) {
+        val q = query.trim().lowercase()
+        if (q.isBlank()) {
+            allLangs
+        } else {
+            allLangs.filter {
+                it.nativeName.lowercase().contains(q) ||
+                    it.englishName.lowercase().contains(q) ||
+                    it.code.lowercase().contains(q)
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Text(
+            text = "${strings.languageTitle} (${allLangs.size} ${strings.languagesCountSuffix})",
+            style = MaterialTheme.typography.titleMedium,
+            color = CordlyTextPrimary,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = strings.languageSubtitle,
+            style = MaterialTheme.typography.labelSmall,
+            color = CordlyTextSecondary
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text(strings.languageSearchPlaceholder) },
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = CordlyCyan) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("world_language_search_input")
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(340.dp)
+        ) {
+            if (query.isBlank()) {
+                item(key = "lang_system") {
+                    LanguageOptionRow(
+                        nativeName = strings.deviceDefaultLanguage,
+                        englishName = "Auto System Locale",
+                        code = "system",
+                        isRtl = false,
+                        selected = selectedCode == "system",
+                        onClick = { onLanguageSelected("system") }
+                    )
+                }
+            }
+            items(filteredLangs, key = { "lang_${it.code}" }) { lang ->
+                LanguageOptionRow(
+                    nativeName = lang.nativeName,
+                    englishName = lang.englishName,
+                    code = lang.code,
+                    isRtl = lang.isRtl,
+                    selected = selectedCode.equals(lang.code, ignoreCase = true),
+                    onClick = { onLanguageSelected(lang.code) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LanguageOptionRow(
+    nativeName: String,
+    englishName: String,
+    code: String,
+    isRtl: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (selected) CordlyBlurple.copy(alpha = 0.22f) else CordlyCardSurface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, if (selected) CordlyCyan else CordlyDivider),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .testTag("language_option_$code")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = nativeName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = CordlyTextPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "$englishName • ${code.uppercase()}" + if (isRtl) " • RTL" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CordlyTextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (selected) {
+                Icon(
+                    Icons.Rounded.CheckCircle,
+                    contentDescription = "Selected",
+                    tint = CordlyCyan,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun WorldLanguagePickerDialog(
+    selectedCode: String,
+    onSelectLanguage: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val strings = LocalAppStrings.current
+    var query by remember { mutableStateOf("") }
+    val allLangs = remember { AppLanguageManager.allWorldLanguages }
+    val filteredLangs = remember(query, allLangs) {
+        val q = query.trim().lowercase()
+        if (q.isBlank()) allLangs else allLangs.filter {
+            it.nativeName.lowercase().contains(q) ||
+                it.englishName.lowercase().contains(q) ||
+                it.code.lowercase().contains(q)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = CordlySurfaceDark,
+        titleContentColor = CordlyTextPrimary,
+        title = {
+            Text(
+                text = "${strings.languageTitle} (${allLangs.size})",
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = { Text(strings.languageSearchPlaceholder) },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null, tint = CordlyCyan) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                ) {
+                    if (query.isBlank()) {
+                        item {
+                            LanguageOptionRow(
+                                nativeName = strings.deviceDefaultLanguage,
+                                englishName = "Auto",
+                                code = "system",
+                                isRtl = false,
+                                selected = selectedCode == "system",
+                                onClick = { onSelectLanguage("system") }
+                            )
+                        }
+                    }
+                    items(filteredLangs, key = { "dlg_${it.code}" }) { lang ->
+                        LanguageOptionRow(
+                            nativeName = lang.nativeName,
+                            englishName = lang.englishName,
+                            code = lang.code,
+                            isRtl = lang.isRtl,
+                            selected = selectedCode.equals(lang.code, ignoreCase = true),
+                            onClick = { onSelectLanguage(lang.code) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(strings.closeButton)
+            }
+        }
+    )
 }

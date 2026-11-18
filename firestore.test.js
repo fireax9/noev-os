@@ -347,3 +347,106 @@ test("Servers allow custom iconUrl, name-based lookup, invite join, and channel 
     })
   );
 });
+
+test("User can claim daily P E Y rewards and fire ax9 channel bonus once", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      email: "alice@gmail.com",
+      displayName: "Alice",
+      friendCode: "NEV-AL1C",
+      status: "online",
+      peyPoints: 200,
+      dailyClaimsCount: 0,
+      lastDailyClaimAtMs: 0,
+      channelRewardClaimed: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).update({
+      peyPoints: 500,
+      dailyClaimsCount: 1,
+      lastDailyClaimAtMs: 1700000000000,
+      channelRewardClaimed: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+test("Voice and video calls enforce participant isolation and sender-matched streams", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const callId = "call_dm_alice_bob";
+
+  await assertSucceeds(
+    aliceDb.collection("calls").doc(callId).set({
+      callerId: ALICE_UID,
+      callerName: "Alice",
+      calleeId: BOB_UID,
+      calleeName: "Bob",
+      participantIds: [ALICE_UID, BOB_UID],
+      targetType: "dm",
+      targetId: `${ALICE_UID}_${BOB_UID}`,
+      callType: "video",
+      status: "ringing",
+      callerMuted: false,
+      calleeMuted: false,
+      callerVideoOn: true,
+      calleeVideoOn: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Bob can answer the call
+  await assertSucceeds(
+    bobDb.collection("calls").doc(callId).update({
+      status: "active",
+      calleeVideoOn: true,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Charlie cannot read or join the private call
+  await assertFails(charlieDb.collection("calls").doc(callId).get());
+
+  // Bob publishes his own stream frame
+  await assertSucceeds(
+    bobDb.collection("calls").doc(callId).collection("streams").doc(BOB_UID).set({
+      callId: callId,
+      senderId: BOB_UID,
+      senderName: "Bob",
+      participantIds: [ALICE_UID, BOB_UID],
+      frameData: "data:image/jpeg;base64,fakeframe",
+      audioLevel: 0.45,
+      videoEnabled: true,
+      muted: false,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Bob cannot spoof Alice's stream doc
+  await assertFails(
+    bobDb.collection("calls").doc(callId).collection("streams").doc(ALICE_UID).set({
+      callId: callId,
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      participantIds: [ALICE_UID, BOB_UID],
+      audioLevel: 0.1,
+      videoEnabled: false,
+      muted: false,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Charlie cannot read streams
+  await assertFails(
+    charlieDb.collection("calls").doc(callId).collection("streams").doc(BOB_UID).get()
+  );
+});

@@ -7,7 +7,7 @@ import com.example.R
 import java.io.File
 
 enum class AppWallpaperMode(val storageKey: String, val label: String) {
-    DEFAULT("default", "Neov Obsidian"),
+    DEFAULT("default", "Pure Black"),
     PRESET_1("preset_1", "Plasma Sunset"),
     PRESET_2("preset_2", "Midnight Violet"),
     PRESET_3("preset_3", "Deep Teal"),
@@ -38,6 +38,7 @@ object AppAppearanceStore {
     private const val PREFS_NAME = "neov_chat_appearance"
     private const val KEY_WALLPAPER_MODE = "wallpaper_mode"
     private const val KEY_CUSTOM_VERSION = "custom_bg_version"
+    private const val KEY_LANGUAGE_CODE = "app_language_code"
     private const val CUSTOM_WALLPAPER_FILENAME = "custom_app_wallpaper.jpg"
 
     @Volatile
@@ -83,6 +84,18 @@ object AppAppearanceStore {
 
     fun customProfileVideoFile(context: Context, uid: String): File {
         return File(context.filesDir, "custom_profile_video_${uid}.mp4")
+    }
+
+    fun loadLanguageCode(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString(KEY_LANGUAGE_CODE, "system") ?: "system"
+    }
+
+    fun saveLanguageCode(context: Context, code: String): String {
+        val clean = code.trim().ifBlank { "system" }
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_LANGUAGE_CODE, clean).apply()
+        return clean
     }
 }
 

@@ -68,6 +68,7 @@ fun AddFriendDialog(
     onSendRequest: (LookupKey) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val strings = LocalAppStrings.current
     var query by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -75,17 +76,17 @@ fun AddFriendDialog(
         containerColor = CordlySurfaceDark,
         titleContentColor = CordlyTextPrimary,
         textContentColor = CordlyTextSecondary,
-        title = { Text("Add a Friend", style = MaterialTheme.typography.titleLarge) },
+        title = { Text(strings.addFriendTitle, style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = "Enter your friend's Gmail or neov chat Friend Code (e.g. NEV-A1B2C3) to earn +200 P E Y!",
+                    text = strings.addFriendDesc,
                     style = MaterialTheme.typography.bodyMedium
                 )
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Gmail or Friend Code") },
+                    label = { Text(strings.addFriendInputLabel) },
                     singleLine = true,
                     trailingIcon = {
                         Icon(Icons.Rounded.Search, contentDescription = null)
@@ -107,7 +108,7 @@ fun AddFriendDialog(
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(8.dp))
                     }
-                    Text("Find Friend")
+                    Text(strings.findFriendButton)
                 }
 
                 when (searchState) {
@@ -157,7 +158,7 @@ fun AddFriendDialog(
                                     ) {
                                         Icon(Icons.Rounded.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Add")
+                                        Text(strings.addButton)
                                     }
                                 }
                             }
@@ -169,7 +170,7 @@ fun AddFriendDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close")
+                Text(strings.closeButton)
             }
         }
     )
@@ -184,6 +185,7 @@ fun CreateServerDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val strings = LocalAppStrings.current
 
     var name by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -224,7 +226,7 @@ fun CreateServerDialog(
         containerColor = CordlySurfaceDark,
         titleContentColor = CordlyTextPrimary,
         textContentColor = CordlyTextSecondary,
-        title = { Text("Create a Server", style = MaterialTheme.typography.titleLarge) },
+        title = { Text(strings.createServerTitle, style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
@@ -279,8 +281,8 @@ fun CreateServerDialog(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Server Name") },
-                    placeholder = { Text("e.g. Squad HQ (friends join by name!)") },
+                    label = { Text(strings.serverNameLabel) },
+                    placeholder = { Text("e.g. Squad HQ") },
                     singleLine = true,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -289,7 +291,7 @@ fun CreateServerDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Topic (optional)") },
+                    label = { Text(strings.topicOptionalLabel) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -343,11 +345,11 @@ fun CreateServerDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = CordlyBlurple),
                 modifier = Modifier.testTag("confirm_create_server_button")
             ) {
-                Text("Create")
+                Text(strings.createButton)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(strings.cancelButton) }
         }
     )
 }
@@ -358,6 +360,7 @@ fun JoinServerDialog(
     onJoin: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val strings = LocalAppStrings.current
     var query by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -365,14 +368,14 @@ fun JoinServerDialog(
         containerColor = CordlySurfaceDark,
         titleContentColor = CordlyTextPrimary,
         textContentColor = CordlyTextSecondary,
-        title = { Text("Join a Server", style = MaterialTheme.typography.titleLarge) },
+        title = { Text(strings.joinServerTitle, style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Type your friend's exact Server Name (e.g. Squad HQ) or paste an invite code.")
+                Text(strings.joinServerDesc)
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Server Name or Invite Code") },
+                    label = { Text(strings.joinServerInputLabel) },
                     placeholder = { Text("e.g. Squad HQ") },
                     singleLine = true,
                     modifier = Modifier
@@ -388,11 +391,11 @@ fun JoinServerDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = CordlyCyan, contentColor = Color(0xFF082026)),
                 modifier = Modifier.testTag("confirm_join_server_button")
             ) {
-                Text("Join")
+                Text(strings.joinButton)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(strings.cancelButton) }
         }
     )
 }
@@ -403,6 +406,7 @@ fun AddChannelDialog(
     onAdd: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val strings = LocalAppStrings.current
     var channelName by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -410,15 +414,14 @@ fun AddChannelDialog(
         containerColor = CordlySurfaceDark,
         titleContentColor = CordlyTextPrimary,
         textContentColor = CordlyTextSecondary,
-        title = { Text("Create Text Channel", style = MaterialTheme.typography.titleLarge) },
+        title = { Text(strings.createChannelTitle, style = MaterialTheme.typography.titleLarge) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Add a new #channel for your server members.")
                 OutlinedTextField(
                     value = channelName,
                     onValueChange = { channelName = it },
-                    label = { Text("Channel Name") },
-                    placeholder = { Text("e.g. voice-chat-notes") },
+                    label = { Text(strings.channelInputLabel) },
+                    placeholder = { Text("e.g. voice-chat") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -430,11 +433,11 @@ fun AddChannelDialog(
                 enabled = channelName.trim().isNotEmpty() && !isBusy,
                 colors = ButtonDefaults.buttonColors(containerColor = CordlyBlurple)
             ) {
-                Text("Create Channel")
+                Text(strings.createButton)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text(strings.cancelButton) }
         }
     )
 }
