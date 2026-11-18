@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "1050958835678",
+    "project_id": "neov-chat-64ffc",
+    "storage_bucket": "neov-chat-64ffc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1050958835678:android:66b3518d6fbe875f67374f",
+        "android_client_info": {
+          "package_name": "com.aistudio.cordly.mxkpqz"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1050958835678-9dhum55llo5fckd6ocapsnf3q5qsg7gi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.cordly.mxkpqz",
+            "certificate_hash": "48e6061e90e05597dbbd60b87a2716d436224a8f"
+          }
+        },
+        {
+          "client_id": "1050958835678-v2e51mv0i3eun6pmqthfto0m3jid88ul.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aistudio.cordly.mxkpqz",
+            "certificate_hash": "2c3cbf20946f795c7bebd6a8fb55a04148b91399"
+          }
+        },
+        {
+          "client_id": "1050958835678-fev8ai1g40p4d5cfi6johqjsies29f12.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD9MQBZ0MvR7q2toUC134k9qxJI4-kAAXw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1050958835678-fev8ai1g40p4d5cfi6johqjsies29f12.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
