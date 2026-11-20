@@ -78,6 +78,7 @@ fun AppEntranceIntroOverlay(
     var showTagline by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        SoundEffectsManager.play(AppSoundEffect.ENTRANCE_CHIME)
         // Stage 1: Pop the lowercase 'n' emblem BIG in the center
         glowAlpha.animateTo(0.85f, animationSpec = tween(260, easing = FastOutSlowInEasing))
         logoScale.animateTo(

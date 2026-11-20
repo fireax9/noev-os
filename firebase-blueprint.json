@@ -2,7 +2,7 @@
   "entities": {
     "UserPrivate": {
       "title": "UserPrivate",
-      "description": "Private user account profile containing Gmail address PII, isolated to owner.",
+      "description": "Private user account profile containing Gmail address PII, rank, P E Y points, and customizations.",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "description": "Firebase Auth UID" },
@@ -11,26 +11,33 @@
         "friendCode": { "type": "string", "description": "Shareable neov chat friend code" },
         "status": { "type": "string", "enum": ["online", "idle", "dnd", "offline"], "description": "Presence status" },
         "photoUrl": { "type": "string", "description": "Profile avatar URL or encoded image" },
-        "bannerUrl": { "type": "string", "description": "Discord-style profile banner background image" },
+        "bannerUrl": { "type": "string", "description": "Profile banner background image" },
         "customStatus": { "type": "string", "description": "Optional custom status text" },
-        "peyPoints": { "type": "integer", "description": "P E Y points balance (200 on sign-in, +200 per friend)" },
+        "peyPoints": { "type": "integer", "description": "P E Y points balance" },
         "ownedFrames": { "type": "array", "description": "Unlocked profile frame IDs" },
         "equippedFrame": { "type": "string", "description": "Currently equipped profile frame ID" },
-        "ownedProfileEffects": { "type": "array", "description": "Unlocked Discord-style 5s video profile effect IDs" },
-        "equippedProfileEffect": { "type": "string", "description": "Currently active 5s video profile effect ID" },
-        "profileVideoData": { "type": "string", "description": "Optional compressed 5-second MP4 data URI for custom profile effect" },
+        "ownedProfileEffects": { "type": "array", "description": "Unlocked video profile effect IDs" },
+        "equippedProfileEffect": { "type": "string", "description": "Currently active video profile effect ID" },
+        "profileVideoData": { "type": "string", "description": "Compressed profile video banner data URI" },
+        "avatarVideoData": { "type": "string", "description": "Compressed Neo Plus animated avatar video data URI" },
+        "rank": { "type": "string", "enum": ["normal", "ultra", "neo_plus"], "description": "User membership tier" },
+        "rankExpiresAtMs": { "type": "integer", "description": "Membership expiration epoch milliseconds" },
+        "ultraTrialUsed": { "type": "boolean", "description": "Whether 3-day Ultra free trial was used" },
+        "neoPlusTrialUsed": { "type": "boolean", "description": "Whether 1-day Neo Plus free trial was used" },
+        "profileThemeColorHex": { "type": "string", "description": "Ultra/Neo Plus full profile color hex" },
         "rewardedFriendUids": { "type": "array", "description": "Friend UIDs already rewarded with +200 P E Y" },
-        "dailyClaimsCount": { "type": "integer", "description": "Number of daily P E Y rewards claimed (first 2 give +100, subsequent give +50)" },
+        "dailyClaimsCount": { "type": "integer", "description": "Number of daily P E Y rewards claimed" },
         "lastDailyClaimAtMs": { "type": "integer", "description": "Epoch milliseconds of last daily P E Y claim" },
         "channelRewardClaimed": { "type": "boolean", "description": "Whether the one-time +200 P E Y fire ax9 channel bonus was claimed" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Server timestamp" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+        "claimedCustomQuests": { "type": "array", "description": "Custom quest IDs claimed by the user" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "email", "displayName", "friendCode", "status", "createdAt"]
     },
     "PublicProfile": {
       "title": "PublicProfile",
-      "description": "Non-PII public user card visible to authenticated peers.",
+      "description": "Non-PII public user card visible to authenticated peers and Ultra directory.",
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
@@ -43,6 +50,10 @@
         "equippedFrame": { "type": "string" },
         "equippedProfileEffect": { "type": "string" },
         "profileVideoData": { "type": "string" },
+        "avatarVideoData": { "type": "string" },
+        "rank": { "type": "string", "enum": ["normal", "ultra", "neo_plus"] },
+        "rankExpiresAtMs": { "type": "integer" },
+        "profileThemeColorHex": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -67,7 +78,7 @@
       "description": "Friend request and accepted friendship state between two users.",
       "type": "object",
       "properties": {
-        "participantIds": { "type": "array", "description": "Bounded 2-element list of UIDs" },
+        "participantIds": { "type": "array" },
         "requesterId": { "type": "string" },
         "recipientId": { "type": "string" },
         "requesterName": { "type": "string" },
@@ -81,15 +92,9 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
-        "participantIds",
-        "requesterId",
-        "recipientId",
-        "requesterName",
-        "recipientName",
-        "requesterCode",
-        "recipientCode",
-        "status",
-        "createdAt"
+        "participantIds", "requesterId", "recipientId",
+        "requesterName", "recipientName", "requesterCode", "recipientCode",
+        "status", "createdAt"
       ]
     },
     "Conversation": {
@@ -97,7 +102,7 @@
       "description": "Direct Message thread between two friends.",
       "type": "object",
       "properties": {
-        "participantIds": { "type": "array", "description": "Bounded 2-element list of UIDs" },
+        "participantIds": { "type": "array" },
         "participantAId": { "type": "string" },
         "participantAName": { "type": "string" },
         "participantAPhoto": { "type": "string" },
@@ -109,28 +114,27 @@
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": [
-        "participantIds",
-        "participantAId",
-        "participantAName",
-        "participantBId",
-        "participantBName",
-        "createdAt"
-      ]
+      "required": ["participantIds", "participantAId", "participantAName", "participantBId", "participantBName", "createdAt"]
     },
     "DirectMessage": {
       "title": "DirectMessage",
-      "description": "Message in a 1-on-1 DM conversation.",
+      "description": "Rich message (text, 4K/standard image, voice audio, sticker, GIF) with Delete-for-Me & Delete-for-Everyone.",
       "type": "object",
       "properties": {
         "conversationId": { "type": "string" },
-        "participantIds": { "type": "array", "description": "Bounded 2-element list of UIDs" },
+        "participantIds": { "type": "array" },
         "senderId": { "type": "string" },
         "senderName": { "type": "string" },
         "senderPhoto": { "type": "string" },
+        "senderRank": { "type": "string", "enum": ["normal", "ultra", "neo_plus"] },
         "text": { "type": "string" },
+        "messageType": { "type": "string", "enum": ["text", "image", "audio", "sticker", "gif", "deleted"] },
+        "mediaData": { "type": "string" },
+        "mediaDurationMs": { "type": "integer" },
         "replyToText": { "type": "string" },
         "edited": { "type": "boolean" },
+        "hiddenFor": { "type": "array" },
+        "deletedForEveryone": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -148,8 +152,8 @@
         "accentHex": { "type": "string" },
         "ownerId": { "type": "string" },
         "inviteCode": { "type": "string" },
-        "memberUids": { "type": "array", "description": "Bounded list of member UIDs (max 25)" },
-        "channels": { "type": "array", "description": "Bounded list of channel names (max 15)" },
+        "memberUids": { "type": "array" },
+        "channels": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -173,18 +177,24 @@
     },
     "ServerMessage": {
       "title": "ServerMessage",
-      "description": "Message inside a server text channel.",
+      "description": "Rich message inside a server text channel.",
       "type": "object",
       "properties": {
         "serverId": { "type": "string" },
         "channelName": { "type": "string" },
-        "memberUids": { "type": "array", "description": "Denormalized bounded list of server member UIDs (max 25)" },
+        "memberUids": { "type": "array" },
         "senderId": { "type": "string" },
         "senderName": { "type": "string" },
         "senderPhoto": { "type": "string" },
+        "senderRank": { "type": "string", "enum": ["normal", "ultra", "neo_plus"] },
         "text": { "type": "string" },
+        "messageType": { "type": "string", "enum": ["text", "image", "audio", "sticker", "gif", "deleted"] },
+        "mediaData": { "type": "string" },
+        "mediaDurationMs": { "type": "integer" },
         "replyToText": { "type": "string" },
         "edited": { "type": "boolean" },
+        "hiddenFor": { "type": "array" },
+        "deletedForEveryone": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -192,7 +202,7 @@
     },
     "CallSession": {
       "title": "CallSession",
-      "description": "Voice or video call signaling and participant state for DMs or Server channels.",
+      "description": "Voice or video call signaling and multi-participant state.",
       "type": "object",
       "properties": {
         "callerId": { "type": "string" },
@@ -201,12 +211,13 @@
         "calleeId": { "type": "string" },
         "calleeName": { "type": "string" },
         "calleePhoto": { "type": "string" },
-        "participantIds": { "type": "array", "description": "Bounded list of call participant UIDs (1..25)" },
+        "participantIds": { "type": "array" },
         "targetType": { "type": "string", "enum": ["dm", "server"] },
         "targetId": { "type": "string" },
         "channelName": { "type": "string" },
         "callType": { "type": "string", "enum": ["voice", "video"] },
         "status": { "type": "string", "enum": ["ringing", "active", "ended", "declined"] },
+        "videoQuality": { "type": "string", "enum": ["144p", "240p", "360p", "480p", "720p", "1080p", "4K"] },
         "callerMuted": { "type": "boolean" },
         "calleeMuted": { "type": "boolean" },
         "callerVideoOn": { "type": "boolean" },
@@ -218,20 +229,60 @@
     },
     "CallStreamFrame": {
       "title": "CallStreamFrame",
-      "description": "Live participant audio meter and throttled camera preview frame inside an active call.",
+      "description": "Live participant PCM audio packet, amplitude meter, face filter, and aspect-preserved video frame.",
       "type": "object",
       "properties": {
         "callId": { "type": "string" },
         "senderId": { "type": "string" },
         "senderName": { "type": "string" },
-        "participantIds": { "type": "array", "description": "Denormalized list of call participant UIDs" },
+        "participantIds": { "type": "array" },
         "frameData": { "type": "string" },
+        "audioData": { "type": "string" },
+        "audioSeq": { "type": "integer" },
+        "voiceEffect": { "type": "string" },
+        "faceFilter": { "type": "string" },
+        "videoQuality": { "type": "string" },
         "audioLevel": { "type": "number" },
         "videoEnabled": { "type": "boolean" },
         "muted": { "type": "boolean" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["callId", "senderId", "senderName", "participantIds", "audioLevel", "videoEnabled", "muted", "updatedAt"]
+    },
+    "CustomQuest": {
+      "title": "CustomQuest",
+      "description": "Community P E Y reward quest authored by Neo Plus members.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "creatorRank": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "questType": { "type": "string", "enum": ["add_friends", "daily_check"] },
+        "targetCount": { "type": "integer" },
+        "rewardPerStep": { "type": "integer" },
+        "totalReward": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["creatorId", "creatorName", "creatorRank", "title", "questType", "targetCount", "rewardPerStep", "totalReward", "createdAt"]
+    },
+    "DeveloperTicket": {
+      "title": "DeveloperTicket",
+      "description": "Direct developer contact message from Neo Plus members.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRank": { "type": "string" },
+        "subject": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "senderRank", "subject", "message", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -245,15 +296,15 @@
     },
     "/lookup_keys/{keyId}": {
       "schema": { "$ref": "#/entities/LookupKey" },
-      "description": "Privacy-safe friend lookup keys by SHA-256 email hash or friend code."
+      "description": "Privacy-safe friend lookup keys."
     },
     "/friendships/{friendshipId}": {
       "schema": { "$ref": "#/entities/Friendship" },
-      "description": "Friendships and friend requests between two users."
+      "description": "Friendships and friend requests."
     },
     "/conversations/{conversationId}": {
       "schema": { "$ref": "#/entities/Conversation" },
-      "description": "Direct Message conversations between two friends."
+      "description": "Direct Message conversations."
     },
     "/conversations/{conversationId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/DirectMessage" },
@@ -261,11 +312,11 @@
     },
     "/servers/{serverId}": {
       "schema": { "$ref": "#/entities/Server" },
-      "description": "Discord-style friend servers with channels."
+      "description": "Discord-style friend servers."
     },
     "/server_invites/{inviteCode}": {
       "schema": { "$ref": "#/entities/ServerInvite" },
-      "description": "Server invite codes for joining a server."
+      "description": "Server invite codes."
     },
     "/servers/{serverId}/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ServerMessage" },
@@ -273,11 +324,19 @@
     },
     "/calls/{callId}": {
       "schema": { "$ref": "#/entities/CallSession" },
-      "description": "Real-time voice and video calls between friends or server members."
+      "description": "Real-time voice and video calls."
     },
     "/calls/{callId}/streams/{senderId}": {
       "schema": { "$ref": "#/entities/CallStreamFrame" },
-      "description": "Live participant audio amplitude and camera frames during an active call."
+      "description": "Live participant audio/video stream packets."
+    },
+    "/custom_quests/{questId}": {
+      "schema": { "$ref": "#/entities/CustomQuest" },
+      "description": "Custom P E Y quests created by Neo Plus members."
+    },
+    "/dev_messages/{ticketId}": {
+      "schema": { "$ref": "#/entities/DeveloperTicket" },
+      "description": "Direct developer contact tickets from Neo Plus members."
     }
   }
 }

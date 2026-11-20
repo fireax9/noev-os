@@ -1,6 +1,8 @@
 package com.example.ui.cordly
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.annotation.DrawableRes
 import androidx.compose.ui.graphics.Color
 import com.example.R
@@ -51,7 +53,9 @@ data class ProfileBannerPreset(
     val titleEn: String,
     val titleAr: String,
     val pattern: BannerPatternType,
-    val colors: List<Color>
+    val colors: List<Color>,
+    val requiredRank: String = "normal",
+    @DrawableRes val artworkResId: Int? = null
 ) {
     val bannerSource: String get() = "${ProfileBannerCatalog.PREFIX}$id"
 }
@@ -115,6 +119,43 @@ object ProfileBannerCatalog {
             titleAr = "نجوم المجرة",
             pattern = BannerPatternType.NEBULA_STARS,
             colors = listOf(Color(0xFF08051A), Color(0xFF4F46E5), Color(0xFFC084FC))
+        ),
+        // Exclusive HD Anime Banners — strictly Dragon Ball, Jujutsu Kaisen & Blue Lock ONLY
+        ProfileBannerPreset(
+            id = "dbz_aura_banner",
+            titleEn = "DBZ: Kamehameha",
+            titleAr = "دراغون بول (ألترا)",
+            pattern = BannerPatternType.SUNSET_RAYS,
+            colors = listOf(Color(0xFF1E1200), Color(0xFFF59E0B), Color(0xFFFDE047)),
+            requiredRank = "ultra",
+            artworkResId = R.drawable.img_anime_dbz
+        ),
+        ProfileBannerPreset(
+            id = "jjk_domain_banner",
+            titleEn = "Gojo: Unlimited Void",
+            titleAr = "غوجو: توسيع المجال",
+            pattern = BannerPatternType.PRISM_SHARDS,
+            colors = listOf(Color(0xFF12051F), Color(0xFF9333EA), Color(0xFF38BDF8)),
+            requiredRank = "ultra",
+            artworkResId = R.drawable.img_anime_gojo
+        ),
+        ProfileBannerPreset(
+            id = "jjk_sukuna_banner",
+            titleEn = "Sukuna: Shrine Hands",
+            titleAr = "سكونا: توسيع المجال",
+            pattern = BannerPatternType.SUNSET_RAYS,
+            colors = listOf(Color(0xFF1A0509), Color(0xFFEF4444), Color(0xFF7F1D1D)),
+            requiredRank = "neo_plus",
+            artworkResId = R.drawable.img_anime_sukuna
+        ),
+        ProfileBannerPreset(
+            id = "bluelock_flow_banner",
+            titleEn = "Blue Lock: Eyes & Ball",
+            titleAr = "بلو لوك (ألترا)",
+            pattern = BannerPatternType.HEX_CYBER,
+            colors = listOf(Color(0xFF020C1E), Color(0xFF1D4ED8), Color(0xFF22D3EE)),
+            requiredRank = "ultra",
+            artworkResId = R.drawable.img_anime_bluelock
         )
     )
 
@@ -225,6 +266,30 @@ enum class AppAccentColor(
     }
 }
 
+enum class AppLogoVariant(
+    val storageKey: String,
+    val aliasName: String,
+    val titleEn: String,
+    val titleAr: String,
+    val badgeColor: Color
+) {
+    DEFAULT("default", "com.example.LauncherDefault", "Discord Blue", "أزرق ديسكورد", Color(0xFF5865F2)),
+    GOLD("gold", "com.example.LauncherGold", "Neo+ Gold", "ذهبي نيو بلس", Color(0xFFF59E0B)),
+    CRIMSON("crimson", "com.example.LauncherCrimson", "Crimson Blaze", "أحمر ملكي", Color(0xFFEF4444)),
+    EMERALD("emerald", "com.example.LauncherEmerald", "Cyber Emerald", "زمردي سيبراني", Color(0xFF10B981));
+
+    companion object {
+        fun fromKey(key: String?): AppLogoVariant {
+            return entries.firstOrNull { it.storageKey == key } ?: DEFAULT
+        }
+    }
+}
+
+data class AppUiLayoutPrefs(
+    val railOnRight: Boolean = false,
+    val compactMessageCards: Boolean = false
+)
+
 data class WallpaperState(
     val mode: AppWallpaperMode = AppWallpaperMode.DEFAULT,
     val customFilePath: String? = null,
@@ -238,6 +303,9 @@ object AppAppearanceStore {
     private const val KEY_LANGUAGE_CODE = "app_language_code"
     private const val KEY_THEME_MODE = "app_theme_mode"
     private const val KEY_ACCENT_COLOR = "app_accent_color"
+    private const val KEY_APP_LOGO = "app_launcher_logo"
+    private const val KEY_RAIL_ON_RIGHT = "layout_rail_on_right"
+    private const val KEY_COMPACT_CARDS = "layout_compact_cards"
     private const val CUSTOM_WALLPAPER_FILENAME = "custom_app_wallpaper.jpg"
 
     @Volatile
@@ -289,6 +357,10 @@ object AppAppearanceStore {
         return File(context.filesDir, "custom_profile_unlimited_video_${uid}.mp4")
     }
 
+    fun customAvatarVideoFile(context: Context, uid: String): File {
+        return File(context.filesDir, "custom_avatar_video_${uid}.mp4")
+    }
+
     fun loadLanguageCode(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         return prefs.getString(KEY_LANGUAGE_CODE, "system") ?: "system"
@@ -322,239 +394,49 @@ object AppAppearanceStore {
         prefs.edit().putString(KEY_ACCENT_COLOR, accent.storageKey).apply()
         return accent
     }
-}
 
-enum class FrameShapeStyle {
-    CIRCLE_ORBIT,
-    OCTAGON_CYBER,
-    PRISM_DIAMOND,
-    DOUBLE_STARBURST,
-    FLAME_CROWN,
-    MATRIX_DASHED
-}
-
-data class ProfileFrameItem(
-    val id: String,
-    val title: String,
-    val subtitle: String,
-    val price: Long,
-    val ringColors: List<Color>,
-    val strokeDp: Float = 3f,
-    val animated: Boolean = false,
-    val shapeStyle: FrameShapeStyle = FrameShapeStyle.CIRCLE_ORBIT
-)
-
-data class ProfileVideoEffectItem(
-    val id: String,
-    val title: String,
-    val subtitle: String,
-    val price: Long,
-    val accentColors: List<Color>,
-    val rawResId: Int? = null,
-    val isCustomUpload: Boolean = false,
-    val isUnlimitedDuration: Boolean = false
-)
-
-object PeyShopCatalog {
-    val frames: List<ProfileFrameItem> = listOf(
-        ProfileFrameItem(
-            id = "none",
-            title = "Classic Steel",
-            subtitle = "Clean forged-iron border",
-            price = 0L,
-            ringColors = listOf(Color(0xFF475569), Color(0xFF334155)),
-            strokeDp = 1.5f,
-            animated = false,
-            shapeStyle = FrameShapeStyle.CIRCLE_ORBIT
-        ),
-        ProfileFrameItem(
-            id = "neon_cyber",
-            title = "Neon Cyber Scanner",
-            subtitle = "Spinning dashed cyan & blurple cyber ring",
-            price = 150L,
-            ringColors = listOf(Color(0xFF22D3EE), Color(0xFF5865F2), Color(0xFF22D3EE)),
-            strokeDp = 3.4f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.MATRIX_DASHED
-        ),
-        ProfileFrameItem(
-            id = "arctic_crystal",
-            title = "Arctic Prism Diamond",
-            subtitle = "Twin faceted ice-blue rotating diamond star",
-            price = 180L,
-            ringColors = listOf(Color(0xFFE0F2FE), Color(0xFF38BDF8), Color(0xFF6366F1), Color(0xFFE0F2FE)),
-            strokeDp = 3.5f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.PRISM_DIAMOND
-        ),
-        ProfileFrameItem(
-            id = "molten_gold",
-            title = "Solar Champion",
-            subtitle = "Blazing gold crown flares & ember halo",
-            price = 200L,
-            ringColors = listOf(Color(0xFFFBBF24), Color(0xFFF97316), Color(0xFFEF4444), Color(0xFFFBBF24)),
-            strokeDp = 3.6f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.FLAME_CROWN
-        ),
-        ProfileFrameItem(
-            id = "emerald_matrix",
-            title = "Emerald Octagon Shield",
-            subtitle = "Sharp octagonal neon emerald cyber frame",
-            price = 250L,
-            ringColors = listOf(Color(0xFF10B981), Color(0xFF34D399), Color(0xFF06B6D4), Color(0xFF10B981)),
-            strokeDp = 3.6f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.OCTAGON_CYBER
-        ),
-        ProfileFrameItem(
-            id = "inferno_crown",
-            title = "Royal Phoenix Crown",
-            subtitle = "Radiant flame spikes & crimson-gold crest",
-            price = 300L,
-            ringColors = listOf(Color(0xFFF59E0B), Color(0xFFEF4444), Color(0xFFFDE047), Color(0xFFF59E0B)),
-            strokeDp = 3.8f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.FLAME_CROWN
-        ),
-        ProfileFrameItem(
-            id = "sakura_bloom",
-            title = "Sakura Orbit Blossom",
-            subtitle = "Silky rose-pink gradient halo & floating petals",
-            price = 320L,
-            ringColors = listOf(Color(0xFFEC4899), Color(0xFFF9A8D4), Color(0xFFFBBF24), Color(0xFFEC4899)),
-            strokeDp = 3.6f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.CIRCLE_ORBIT
-        ),
-        ProfileFrameItem(
-            id = "diamond_pixel",
-            title = "Voxel Diamond Crest",
-            subtitle = "Crystalline twin-diamond sky & cobalt crest",
-            price = 350L,
-            ringColors = listOf(Color(0xFF38BDF8), Color(0xFFE0F2FE), Color(0xFF3B82F6), Color(0xFF38BDF8)),
-            strokeDp = 3.8f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.PRISM_DIAMOND
-        ),
-        ProfileFrameItem(
-            id = "crimson_halo",
-            title = "Crimson Starburst",
-            subtitle = "Fierce ruby & magenta starburst aura",
-            price = 400L,
-            ringColors = listOf(Color(0xFFF43F5E), Color(0xFFEC4899), Color(0xFF9333EA), Color(0xFFF43F5E)),
-            strokeDp = 3.8f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.DOUBLE_STARBURST
-        ),
-        ProfileFrameItem(
-            id = "void_glitch",
-            title = "Void Hex Glitch",
-            subtitle = "Dark violet & electric neon octagonal frame",
-            price = 450L,
-            ringColors = listOf(Color(0xFF8B5CF6), Color(0xFFD946EF), Color(0xFF22D3EE), Color(0xFF8B5CF6)),
-            strokeDp = 4.0f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.OCTAGON_CYBER
-        ),
-        ProfileFrameItem(
-            id = "prismatic_aura",
-            title = "Prismatic Mythic",
-            subtitle = "Full-spectrum rotating cosmic starburst halo",
-            price = 600L,
-            ringColors = listOf(
-                Color(0xFFEF4444),
-                Color(0xFFF59E0B),
-                Color(0xFF10B981),
-                Color(0xFF22D3EE),
-                Color(0xFF6366F1),
-                Color(0xFFEC4899),
-                Color(0xFFEF4444)
-            ),
-            strokeDp = 4.2f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.DOUBLE_STARBURST
-        ),
-        ProfileFrameItem(
-            id = "galaxy_infinity",
-            title = "Galaxy Infinity Ring",
-            subtitle = "Dual counter-spinning cosmic scanner & gold sparks",
-            price = 750L,
-            ringColors = listOf(Color(0xFF4F46E5), Color(0xFF22D3EE), Color(0xFFFBBF24), Color(0xFFEC4899), Color(0xFF4F46E5)),
-            strokeDp = 4.3f,
-            animated = true,
-            shapeStyle = FrameShapeStyle.MATRIX_DASHED
-        )
-    )
-
-    val profileEffects: List<ProfileVideoEffectItem> = listOf(
-        ProfileVideoEffectItem(
-            id = "none",
-            title = "No Video Intro",
-            subtitle = "Standard static Discord banner",
-            price = 0L,
-            accentColors = listOf(Color(0xFF334155), Color(0xFF1E293B)),
-            rawResId = null
-        ),
-        ProfileVideoEffectItem(
-            id = "cyber_wave",
-            title = "Cyber Pulse Wave (5s Video)",
-            subtitle = "Electric neon blurple motion loop on profile open",
-            price = 100L,
-            accentColors = listOf(Color(0xFF5865F2), Color(0xFF22D3EE)),
-            rawResId = R.raw.anim_cyber_wave
-        ),
-        ProfileVideoEffectItem(
-            id = "solar_flame",
-            title = "Solar Flare Drift (5s Video)",
-            subtitle = "Molten amber & ember waves across your profile",
-            price = 150L,
-            accentColors = listOf(Color(0xFFF59E0B), Color(0xFFEF4444)),
-            rawResId = R.raw.anim_solar_flame
-        ),
-        ProfileVideoEffectItem(
-            id = "emerald_matrix",
-            title = "Emerald Surge (5s Video)",
-            subtitle = "Flowing neon emerald waves behind your card",
-            price = 200L,
-            accentColors = listOf(Color(0xFF10B981), Color(0xFF06B6D4)),
-            rawResId = R.raw.anim_emerald_matrix
-        ),
-        ProfileVideoEffectItem(
-            id = "royal_galaxy",
-            title = "Cosmic Galaxy Spin (5s Video)",
-            subtitle = "Swirling violet & indigo nebula entrance video",
-            price = 250L,
-            accentColors = listOf(Color(0xFF8B5CF6), Color(0xFFEC4899)),
-            rawResId = R.raw.anim_royal_galaxy
-        ),
-        ProfileVideoEffectItem(
-            id = "custom_video",
-            title = "Your Custom 5s Video",
-            subtitle = "Pick any video from gallery — auto-trimmed to 5 seconds",
-            price = 200L,
-            accentColors = listOf(Color(0xFF22D3EE), Color(0xFF5865F2)),
-            rawResId = null,
-            isCustomUpload = true,
-            isUnlimitedDuration = false
-        ),
-        ProfileVideoEffectItem(
-            id = "custom_video_unlimited",
-            title = "Unlimited Full Video (∞)",
-            subtitle = "Play your entire full-length gallery video with unlimited time (no 5s limit!)",
-            price = 1000L,
-            accentColors = listOf(Color(0xFFF59E0B), Color(0xFFEC4899), Color(0xFF6366F1)),
-            rawResId = null,
-            isCustomUpload = true,
-            isUnlimitedDuration = true
-        )
-    )
-
-    fun findById(frameId: String?): ProfileFrameItem {
-        return frames.firstOrNull { it.id == frameId } ?: frames.first()
+    fun loadLogoVariant(context: Context): AppLogoVariant {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return AppLogoVariant.fromKey(prefs.getString(KEY_APP_LOGO, null))
     }
 
-    fun findEffectById(effectId: String?): ProfileVideoEffectItem {
-        return profileEffects.firstOrNull { it.id == effectId } ?: profileEffects.first()
+    fun applyAppLogoVariant(context: Context, variant: AppLogoVariant): AppLogoVariant {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_APP_LOGO, variant.storageKey).apply()
+        val pm = context.packageManager
+        val pkg = context.packageName
+        AppLogoVariant.entries.forEach { entry ->
+            val targetState = if (entry == variant) {
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            } else {
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+            }
+            try {
+                pm.setComponentEnabledSetting(
+                    ComponentName(pkg, entry.aliasName),
+                    targetState,
+                    PackageManager.DONT_KILL_APP
+                )
+            } catch (_: Exception) {
+            }
+        }
+        return variant
+    }
+
+    fun loadLayoutPrefs(context: Context): AppUiLayoutPrefs {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return AppUiLayoutPrefs(
+            railOnRight = prefs.getBoolean(KEY_RAIL_ON_RIGHT, false),
+            compactMessageCards = prefs.getBoolean(KEY_COMPACT_CARDS, false)
+        )
+    }
+
+    fun saveLayoutPrefs(context: Context, layout: AppUiLayoutPrefs): AppUiLayoutPrefs {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putBoolean(KEY_RAIL_ON_RIGHT, layout.railOnRight)
+            .putBoolean(KEY_COMPACT_CARDS, layout.compactMessageCards)
+            .apply()
+        return layout
     }
 }

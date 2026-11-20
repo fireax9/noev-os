@@ -22,9 +22,11 @@ class CordlyRepositoryRuleTest : FirestoreEmulatorTestBase() {
 
         val aliceUid = signInTestUser(aliceEmail)
         val aliceRepo = CordlyRepository(firestore, auth)
-        val aliceProfile = withTimeout(DEFAULT_TIMEOUT_MS) {
+        val aliceBootstrap = withTimeout(DEFAULT_TIMEOUT_MS) {
             aliceRepo.ensureUserProfile(checkNotNull(auth.currentUser)).getOrThrow()
         }
+        val aliceProfile = aliceBootstrap.user
+        assertTrue(aliceBootstrap.isNewAccount)
         assertEquals(aliceUid, aliceProfile.userId)
         assertTrue(aliceProfile.friendCode.startsWith("NEV-"))
         assertEquals(200L, aliceProfile.peyPoints)
@@ -52,13 +54,13 @@ class CordlyRepositoryRuleTest : FirestoreEmulatorTestBase() {
         val aliceUid = signInTestUser(aliceEmail)
         val aliceRepo = CordlyRepository(firestore, auth)
         val aliceUser = withTimeout(DEFAULT_TIMEOUT_MS) {
-            aliceRepo.ensureUserProfile(checkNotNull(auth.currentUser)).getOrThrow()
+            aliceRepo.ensureUserProfile(checkNotNull(auth.currentUser)).getOrThrow().user
         }
 
         val bobUid = signInTestUser(bobEmail)
         val bobRepo = CordlyRepository(firestore, auth)
         val bobUser = withTimeout(DEFAULT_TIMEOUT_MS) {
-            bobRepo.ensureUserProfile(checkNotNull(auth.currentUser)).getOrThrow()
+            bobRepo.ensureUserProfile(checkNotNull(auth.currentUser)).getOrThrow().user
         }
 
         // Alice sends friend request to Bob (+200 P E Y -> 400 P E Y)
@@ -66,7 +68,7 @@ class CordlyRepositoryRuleTest : FirestoreEmulatorTestBase() {
         val bobLookup = withTimeout(DEFAULT_TIMEOUT_MS) {
             aliceRepo.findUserByEmailOrCode(bobEmail).getOrThrow()!!
         }
-        val friendshipId = withTimeout(DEFAULT_TIMEOUT_MS) {
+        val (friendshipId, _) = withTimeout(DEFAULT_TIMEOUT_MS) {
             aliceRepo.sendFriendRequest(aliceUser, bobLookup).getOrThrow()
         }
         val aliceAfterFriend = withTimeout(FLOW_TIMEOUT_MS) {
@@ -106,7 +108,7 @@ class CordlyRepositoryRuleTest : FirestoreEmulatorTestBase() {
             bobRepo.observeFriendships(bobUid).first { list -> list.any { it.id == friendshipId } }
         }
         val request = friendships.first { it.id == friendshipId }
-        val convId = withTimeout(DEFAULT_TIMEOUT_MS) {
+        val (convId, _) = withTimeout(DEFAULT_TIMEOUT_MS) {
             bobRepo.acceptFriendRequest(request).getOrThrow()
         }
         val bobAfterAccept = withTimeout(FLOW_TIMEOUT_MS) {
@@ -173,7 +175,7 @@ class CordlyRepositoryRuleTest : FirestoreEmulatorTestBase() {
         val bobUid = signInTestUser(bobEmail)
         val bobRepo = CordlyRepository(firestore, auth)
         val bobUser = withTimeout(DEFAULT_TIMEOUT_MS) {
-            bobRepo.ensureUserProfile(checkNotNull(auth.currentUser)).getOrThrow()
+            bobRepo.ensureUserProfile(checkNotNull(auth.currentUser)).getOrThrow().user
         }
 
         // Bob joins by typing ONLY the Server Name!

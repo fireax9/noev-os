@@ -1,8 +1,16 @@
 package com.example.ui.cordly
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,10 +34,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.CameraAlt
@@ -39,9 +47,9 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.PersonRemove
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ShoppingBag
-import androidx.compose.material.icons.rounded.Stars
 import androidx.compose.material.icons.rounded.Tag
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Button
@@ -60,9 +68,11 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +87,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -101,6 +112,7 @@ import com.example.ui.theme.CordlySurfaceDark
 import com.example.ui.theme.CordlyTextMuted
 import com.example.ui.theme.CordlyTextPrimary
 import com.example.ui.theme.CordlyTextSecondary
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -131,6 +143,10 @@ fun CordlyHomeScreen(
     val activeCalls by viewModel.activeCalls.collectAsStateWithLifecycle()
     val callStreams by viewModel.callStreams.collectAsStateWithLifecycle()
     val joinedCallId by viewModel.joinedCallId.collectAsStateWithLifecycle()
+    val ultraDirectoryMembers by viewModel.ultraDirectoryMembers.collectAsStateWithLifecycle()
+    val customQuests by viewModel.customQuests.collectAsStateWithLifecycle()
+    val developerTickets by viewModel.developerTickets.collectAsStateWithLifecycle()
+    val welcomeBanner by viewModel.welcomeBanner.collectAsStateWithLifecycle()
 
     var isCallMinimized by remember { mutableStateOf(false) }
     var hasSeenJoinedCall by remember(joinedCallId) { mutableStateOf(false) }
@@ -157,8 +173,37 @@ fun CordlyHomeScreen(
         }
     }
 
+    // Android 13+ notification permission + channels setup
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+    var notifPrompted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(context) {
+        CordlyNotificationHelper.ensureChannels(context)
+        if (!notifPrompted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPrompted = true
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    // Auto-dismiss welcome / welcome-back banner
+    LaunchedEffect(welcomeBanner) {
+        if (welcomeBanner != WelcomeBootstrapState.Hidden) {
+            delay(4500L)
+            viewModel.dismissWelcomeBanner()
+        }
+    }
+
     var wallpaperState by remember {
         mutableStateOf(AppAppearanceStore.peekCached() ?: WallpaperState())
+    }
+    var layoutPrefs by remember {
+        mutableStateOf(AppAppearanceStore.loadLayoutPrefs(context))
+    }
+    var currentLogoVariant by remember {
+        mutableStateOf(AppAppearanceStore.loadLogoVariant(context))
     }
     LaunchedEffect(context) {
         wallpaperState = AppAppearanceStore.loadAsync(context)
@@ -170,6 +215,8 @@ fun CordlyHomeScreen(
     var showJoinServerDialog by remember { mutableStateOf(false) }
     var showAddChannelForServer by remember { mutableStateOf<Server?>(null) }
     var settingsModalTab by remember { mutableStateOf<Int?>(null) }
+    var showShopDialog by remember { mutableStateOf(false) }
+    var showQuestsDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(snackbarMessage) {
         val msg = snackbarMessage
@@ -180,12 +227,75 @@ fun CordlyHomeScreen(
     }
 
     val ownProfile = (ownProfileState as? UiState.Success)?.data
+    val effectiveRank = remember(ownProfile?.rank, ownProfile?.rankExpiresAtMs) {
+        CordlyRepository.effectiveRank(ownProfile)
+    }
     val friendships = (friendshipsState as? UiState.Success)?.data.orEmpty()
+    val acceptedFriends = remember(friendships) {
+        friendships.filter { it.status == "accepted" }
+    }
     val conversations = (conversationsState as? UiState.Success)?.data.orEmpty()
     val servers = (serversState as? UiState.Success)?.data.orEmpty()
 
     val incomingRequests = remember(friendships, viewModel.currentUserId) {
         friendships.filter { it.status == "pending" && it.recipientId == viewModel.currentUserId }
+    }
+
+    // Play incoming message sound + post Android notification when a friend sends a new message
+    val seenConvMessages = remember { mutableStateMapOf<String, String>() }
+    var convTrackerSeeded by remember { mutableStateOf(false) }
+    LaunchedEffect(conversations) {
+        if (conversationsState !is UiState.Success) return@LaunchedEffect
+        if (!convTrackerSeeded) {
+            conversations.forEach { c ->
+                seenConvMessages[c.id] = c.lastMessageText.orEmpty()
+            }
+            convTrackerSeeded = true
+            return@LaunchedEffect
+        }
+        conversations.forEach { c ->
+            val currentMsg = c.lastMessageText.orEmpty()
+            val prevMsg = seenConvMessages[c.id]
+            if (currentMsg.isNotBlank() && currentMsg != prevMsg) {
+                seenConvMessages[c.id] = currentMsg
+                if (c.lastMessageSenderId != viewModel.currentUserId) {
+                    SoundEffectsManager.play(AppSoundEffect.MESSAGE_IN)
+                    val isCurrentlyViewing = (activeChat as? ActiveChatTarget.DirectChat)?.conversationId == c.id
+                    if (!isCurrentlyViewing) {
+                        val isA = c.participantAId == viewModel.currentUserId
+                        val senderName = if (isA) c.participantBName else c.participantAName
+                        CordlyNotificationHelper.notifyIncomingMessage(context, senderName, currentMsg)
+                    }
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(incomingCall?.id) {
+        incomingCall?.let { call ->
+            CordlyNotificationHelper.notifyIncomingCall(
+                context = context,
+                callerName = call.callerName,
+                isVideo = call.callType == "video"
+            )
+        }
+    }
+
+    val inviteableFriends = remember(acceptedFriends, joinedCall, viewModel.currentUserId) {
+        val currentParticipants = joinedCall?.participantIds.orEmpty().toSet()
+        acceptedFriends.mapNotNull { fr ->
+            val isReq = fr.requesterId == viewModel.currentUserId
+            val peerId = if (isReq) fr.recipientId else fr.requesterId
+            if (currentParticipants.contains(peerId)) {
+                null
+            } else {
+                InviteableFriend(
+                    uid = peerId,
+                    name = if (isReq) fr.recipientName else fr.requesterName,
+                    photoUrl = if (isReq) fr.recipientPhoto else fr.requesterPhoto
+                )
+            }
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -198,80 +308,101 @@ fun CordlyHomeScreen(
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
                 val isWideScreen = maxWidth >= 720.dp
 
+                val railComposable: @Composable () -> Unit = {
+                    ServerRail(
+                        servers = servers,
+                        activeDestination = destination,
+                        pendingRequestCount = incomingRequests.size,
+                        hasWallpaper = hasWallpaper,
+                        onSelectHome = { viewModel.selectHome() },
+                        onOpenQuestsClick = { showQuestsDialog = true },
+                        onSelectServer = { viewModel.selectServer(it) },
+                        onCreateServerClick = { showCreateServerDialog = true },
+                        onJoinServerClick = { showJoinServerDialog = true }
+                    )
+                }
+
+                val sidebarComposable: @Composable (Modifier) -> Unit = { sidebarMod ->
+                    WorkspaceSidebar(
+                        modifier = sidebarMod,
+                        currentUserId = viewModel.currentUserId,
+                        ownProfile = ownProfile,
+                        effectiveRank = effectiveRank,
+                        destination = destination,
+                        homeTab = homeTab,
+                        hasWallpaper = hasWallpaper,
+                        friendshipsState = friendshipsState,
+                        conversationsState = conversationsState,
+                        servers = servers,
+                        activeCalls = activeCalls,
+                        onSetHomeTab = { viewModel.setHomeTab(it) },
+                        onAddFriendClick = { showAddFriendDialog = true },
+                        onCopyCode = { code ->
+                            clipboardManager.setText(AnnotatedString(code))
+                            scope.launch { snackbarHostState.showSnackbar("${strings.copiedToast}: $code") }
+                        },
+                        onAcceptRequest = { viewModel.acceptFriendRequest(it) },
+                        onDeclineRequest = { viewModel.removeFriendship(it.id) },
+                        onStartChatWithFriend = { viewModel.startChatWithFriend(it) },
+                        onStartVoiceCallWithFriend = { friend ->
+                            val isReq = friend.requesterId == viewModel.currentUserId
+                            val peerId = if (isReq) friend.recipientId else friend.requesterId
+                            val peerName = if (isReq) friend.recipientName else friend.requesterName
+                            val peerPhoto = if (isReq) friend.recipientPhoto else friend.requesterPhoto
+                            val convId = CordlyRepository.deterministicPairId(viewModel.currentUserId, peerId)
+                            viewModel.startDirectCall(peerId, peerName, peerPhoto, convId, "voice")
+                        },
+                        onOpenConversation = { viewModel.openDirectChat(it.id) },
+                        onOpenUserProfile = { uid, name, photo, onMsg ->
+                            viewModel.openProfileViewer(uid, name, photo, onMsg)
+                        },
+                        onOpenChannel = { srv, ch -> viewModel.openServerChannel(srv.id, ch) },
+                        onAddChannelClick = { showAddChannelForServer = it },
+                        onUpdateServerIcon = { srv, url -> viewModel.updateServerIcon(srv, url) },
+                        onKickMember = { srv, uid -> viewModel.removeMemberFromServer(srv, uid) },
+                        onStartServerCall = { srv, ch, callType ->
+                            viewModel.startOrJoinServerCall(srv, ch, callType)
+                        },
+                        onJoinOngoingCall = { call -> viewModel.joinOngoingCall(call) },
+                        onImageError = { msg -> viewModel.showMessage(msg) },
+                        onLeaveServer = { viewModel.leaveServer(it.id) },
+                        onEditProfileClick = { settingsModalTab = 0 },
+                        onOpenShopClick = { showShopDialog = true },
+                        onSignOutClick = { signOut(credentialManager, scope) }
+                    )
+                }
+
                 if (isWideScreen) {
                     Row(modifier = Modifier.fillMaxSize()) {
-                        ServerRail(
-                            servers = servers,
-                            activeDestination = destination,
-                            pendingRequestCount = incomingRequests.size,
-                            hasWallpaper = hasWallpaper,
-                            onSelectHome = { viewModel.selectHome() },
-                            onSelectServer = { viewModel.selectServer(it) },
-                            onCreateServerClick = { showCreateServerDialog = true },
-                            onJoinServerClick = { showJoinServerDialog = true }
-                        )
-
-                        WorkspaceSidebar(
-                            modifier = Modifier.width(316.dp).fillMaxHeight(),
-                            currentUserId = viewModel.currentUserId,
-                            ownProfile = ownProfile,
-                            destination = destination,
-                            homeTab = homeTab,
-                            hasWallpaper = hasWallpaper,
-                            friendshipsState = friendshipsState,
-                            conversationsState = conversationsState,
-                            servers = servers,
-                            activeCalls = activeCalls,
-                            onSetHomeTab = { viewModel.setHomeTab(it) },
-                            onAddFriendClick = { showAddFriendDialog = true },
-                            onCopyCode = { code ->
-                                clipboardManager.setText(AnnotatedString(code))
-                                scope.launch { snackbarHostState.showSnackbar("${strings.copiedToast}: $code") }
-                            },
-                            onAcceptRequest = { viewModel.acceptFriendRequest(it) },
-                            onDeclineRequest = { viewModel.removeFriendship(it.id) },
-                            onStartChatWithFriend = { viewModel.startChatWithFriend(it) },
-                            onStartVoiceCallWithFriend = { friend ->
-                                val isReq = friend.requesterId == viewModel.currentUserId
-                                val peerId = if (isReq) friend.recipientId else friend.requesterId
-                                val peerName = if (isReq) friend.recipientName else friend.requesterName
-                                val peerPhoto = if (isReq) friend.recipientPhoto else friend.requesterPhoto
-                                val convId = CordlyRepository.deterministicPairId(viewModel.currentUserId, peerId)
-                                viewModel.startDirectCall(peerId, peerName, peerPhoto, convId, "voice")
-                            },
-                            onOpenConversation = { viewModel.openDirectChat(it.id) },
-                            onOpenUserProfile = { uid, name, photo, onMsg ->
-                                viewModel.openProfileViewer(uid, name, photo, onMsg)
-                            },
-                            onOpenChannel = { srv, ch -> viewModel.openServerChannel(srv.id, ch) },
-                            onAddChannelClick = { showAddChannelForServer = it },
-                            onUpdateServerIcon = { srv, url -> viewModel.updateServerIcon(srv, url) },
-                            onStartServerCall = { srv, ch, callType ->
-                                viewModel.startOrJoinServerCall(srv, ch, callType)
-                            },
-                            onJoinOngoingCall = { call -> viewModel.joinOngoingCall(call) },
-                            onImageError = { msg -> viewModel.showMessage(msg) },
-                            onLeaveServer = { viewModel.leaveServer(it.id) },
-                            onEditProfileClick = { settingsModalTab = 0 },
-                            onOpenShopClick = { settingsModalTab = 1 },
-                            onSignOutClick = { signOut(credentialManager, scope) }
-                        )
-
+                        if (!layoutPrefs.railOnRight) railComposable()
+                        sidebarComposable(Modifier.width(316.dp).fillMaxHeight())
                         Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                             ActiveChatPane(
                                 activeChat = activeChat,
                                 showBackButton = false,
                                 hasWallpaper = hasWallpaper,
                                 currentUserId = viewModel.currentUserId,
+                                currentUserRank = effectiveRank,
+                                compactCards = layoutPrefs.compactMessageCards,
                                 conversations = conversations,
                                 servers = servers,
                                 directMessagesState = directMessagesState,
                                 serverMessagesState = serverMessagesState,
                                 onBack = { viewModel.closeActiveChat() },
-                                onSendDirect = { conv, text, reply -> viewModel.sendDirectMessage(conv, text, reply) },
-                                onDeleteDirect = { convId, msgId -> viewModel.deleteDirectMessage(convId, msgId) },
-                                onSendServer = { srv, ch, text, reply -> viewModel.sendServerMessage(srv, ch, text, reply) },
-                                onDeleteServer = { srvId, msgId -> viewModel.deleteServerMessage(srvId, msgId) },
+                                onSendDirect = { conv, text, reply, type, data, dur ->
+                                    SoundEffectsManager.play(AppSoundEffect.MESSAGE_OUT)
+                                    viewModel.sendDirectMessage(conv, text, reply, type, data, dur)
+                                },
+                                onDeleteDirect = { convId, msgId, forEveryone ->
+                                    viewModel.deleteDirectMessage(convId, msgId, forEveryone)
+                                },
+                                onSendServer = { srv, ch, text, reply, type, data, dur ->
+                                    SoundEffectsManager.play(AppSoundEffect.MESSAGE_OUT)
+                                    viewModel.sendServerMessage(srv, ch, text, reply, type, data, dur)
+                                },
+                                onDeleteServer = { srvId, msgId, forEveryone ->
+                                    viewModel.deleteServerMessage(srvId, msgId, forEveryone)
+                                },
                                 onOpenUserProfile = { uid, name, photo ->
                                     viewModel.openProfileViewer(uid, name, photo, null)
                                 },
@@ -280,9 +411,11 @@ fun CordlyHomeScreen(
                                 },
                                 onStartServerCall = { srv, ch, callType ->
                                     viewModel.startOrJoinServerCall(srv, ch, callType)
-                                }
+                                },
+                                onStatusToast = { viewModel.showMessage(it) }
                             )
                         }
+                        if (layoutPrefs.railOnRight) railComposable()
                     }
                 } else {
                     val currentChat = activeChat
@@ -292,15 +425,27 @@ fun CordlyHomeScreen(
                             showBackButton = true,
                             hasWallpaper = hasWallpaper,
                             currentUserId = viewModel.currentUserId,
+                            currentUserRank = effectiveRank,
+                            compactCards = layoutPrefs.compactMessageCards,
                             conversations = conversations,
                             servers = servers,
                             directMessagesState = directMessagesState,
                             serverMessagesState = serverMessagesState,
                             onBack = { viewModel.closeActiveChat() },
-                            onSendDirect = { conv, text, reply -> viewModel.sendDirectMessage(conv, text, reply) },
-                            onDeleteDirect = { convId, msgId -> viewModel.deleteDirectMessage(convId, msgId) },
-                            onSendServer = { srv, ch, text, reply -> viewModel.sendServerMessage(srv, ch, text, reply) },
-                            onDeleteServer = { srvId, msgId -> viewModel.deleteServerMessage(srvId, msgId) },
+                            onSendDirect = { conv, text, reply, type, data, dur ->
+                                SoundEffectsManager.play(AppSoundEffect.MESSAGE_OUT)
+                                viewModel.sendDirectMessage(conv, text, reply, type, data, dur)
+                            },
+                            onDeleteDirect = { convId, msgId, forEveryone ->
+                                viewModel.deleteDirectMessage(convId, msgId, forEveryone)
+                            },
+                            onSendServer = { srv, ch, text, reply, type, data, dur ->
+                                SoundEffectsManager.play(AppSoundEffect.MESSAGE_OUT)
+                                viewModel.sendServerMessage(srv, ch, text, reply, type, data, dur)
+                            },
+                            onDeleteServer = { srvId, msgId, forEveryone ->
+                                viewModel.deleteServerMessage(srvId, msgId, forEveryone)
+                            },
                             onOpenUserProfile = { uid, name, photo ->
                                 viewModel.openProfileViewer(uid, name, photo, null)
                             },
@@ -309,78 +454,38 @@ fun CordlyHomeScreen(
                             },
                             onStartServerCall = { srv, ch, callType ->
                                 viewModel.startOrJoinServerCall(srv, ch, callType)
-                            }
+                            },
+                            onStatusToast = { viewModel.showMessage(it) }
                         )
                     } else {
                         Row(modifier = Modifier.fillMaxSize()) {
-                            ServerRail(
-                                servers = servers,
-                                activeDestination = destination,
-                                pendingRequestCount = incomingRequests.size,
-                                hasWallpaper = hasWallpaper,
-                                onSelectHome = { viewModel.selectHome() },
-                                onSelectServer = { viewModel.selectServer(it) },
-                                onCreateServerClick = { showCreateServerDialog = true },
-                                onJoinServerClick = { showJoinServerDialog = true }
-                            )
-                            WorkspaceSidebar(
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                                currentUserId = viewModel.currentUserId,
-                                ownProfile = ownProfile,
-                                destination = destination,
-                                homeTab = homeTab,
-                                hasWallpaper = hasWallpaper,
-                                friendshipsState = friendshipsState,
-                                conversationsState = conversationsState,
-                                servers = servers,
-                                activeCalls = activeCalls,
-                                onSetHomeTab = { viewModel.setHomeTab(it) },
-                                onAddFriendClick = { showAddFriendDialog = true },
-                                onCopyCode = { code ->
-                                    clipboardManager.setText(AnnotatedString(code))
-                                    scope.launch { snackbarHostState.showSnackbar("${strings.copiedToast}: $code") }
-                                },
-                                onAcceptRequest = { viewModel.acceptFriendRequest(it) },
-                                onDeclineRequest = { viewModel.removeFriendship(it.id) },
-                                onStartChatWithFriend = { viewModel.startChatWithFriend(it) },
-                                onStartVoiceCallWithFriend = { friend ->
-                                    val isReq = friend.requesterId == viewModel.currentUserId
-                                    val peerId = if (isReq) friend.recipientId else friend.requesterId
-                                    val peerName = if (isReq) friend.recipientName else friend.requesterName
-                                    val peerPhoto = if (isReq) friend.recipientPhoto else friend.requesterPhoto
-                                    val convId = CordlyRepository.deterministicPairId(viewModel.currentUserId, peerId)
-                                    viewModel.startDirectCall(peerId, peerName, peerPhoto, convId, "voice")
-                                },
-                                onOpenConversation = { viewModel.openDirectChat(it.id) },
-                                onOpenUserProfile = { uid, name, photo, onMsg ->
-                                    viewModel.openProfileViewer(uid, name, photo, onMsg)
-                                },
-                                onOpenChannel = { srv, ch -> viewModel.openServerChannel(srv.id, ch) },
-                                onAddChannelClick = { showAddChannelForServer = it },
-                                onUpdateServerIcon = { srv, url -> viewModel.updateServerIcon(srv, url) },
-                                onStartServerCall = { srv, ch, callType ->
-                                    viewModel.startOrJoinServerCall(srv, ch, callType)
-                                },
-                                onJoinOngoingCall = { call -> viewModel.joinOngoingCall(call) },
-                                onImageError = { msg -> viewModel.showMessage(msg) },
-                                onLeaveServer = { viewModel.leaveServer(it.id) },
-                                onEditProfileClick = { settingsModalTab = 0 },
-                                onOpenShopClick = { settingsModalTab = 1 },
-                                onSignOutClick = { signOut(credentialManager, scope) }
-                            )
+                            if (!layoutPrefs.railOnRight) railComposable()
+                            sidebarComposable(Modifier.weight(1f).fillMaxHeight())
+                            if (layoutPrefs.railOnRight) railComposable()
                         }
                     }
                 }
             }
         }
 
-        // Incoming Call & Minimized Ongoing Call Floating Banners
+        // Welcome / Welcome-Back, Incoming Call & Minimized Ongoing Call Floating Banners
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .statusBarsPadding()
         ) {
+            AnimatedVisibility(
+                visible = welcomeBanner != WelcomeBootstrapState.Hidden,
+                enter = slideInVertically { -it } + fadeIn(),
+                exit = slideOutVertically { -it } + fadeOut()
+            ) {
+                WelcomeStatusBanner(
+                    state = welcomeBanner,
+                    onDismiss = { viewModel.dismissWelcomeBanner() }
+                )
+            }
+
             AnimatedVisibility(visible = incomingCall != null) {
                 incomingCall?.let { call ->
                     IncomingCallBanner(
@@ -496,12 +601,15 @@ fun CordlyHomeScreen(
         )
     }
 
+    // Isolated Settings & Languages Modal (NO Shop here)
     val modalTab = settingsModalTab
     if (modalTab != null) {
         SettingsAndShopDialog(
             initialTab = modalTab,
             profile = ownProfile,
             wallpaperState = wallpaperState,
+            layoutPrefs = layoutPrefs,
+            currentLogoVariant = currentLogoVariant,
             isBusy = isBusy,
             onSelectWallpaperMode = { mode ->
                 wallpaperState = AppAppearanceStore.saveMode(context, mode)
@@ -519,18 +627,45 @@ fun CordlyHomeScreen(
             onQuickUpdateMedia = { photoUrl, bannerUrl, clearBanner, label ->
                 viewModel.updateProfileMedia(photoUrl, bannerUrl, clearBanner, label)
             },
-            onClaimDailyReward = {
-                viewModel.claimDailyReward()
+            onUpdateProfileThemeColor = { hex ->
+                viewModel.updateProfileThemeColor(hex)
             },
-            onClaimChannelReward = { enteredChannel ->
-                viewModel.claimChannelReward(enteredChannel)
+            onUpdateAvatarVideo = { dataUri ->
+                viewModel.updateAvatarVideo(dataUri)
             },
-            onBuyFrame = { frame ->
-                viewModel.purchaseAndEquipFrame(frame)
+            onUpdateAppLogo = { variant ->
+                currentLogoVariant = AppAppearanceStore.applyAppLogoVariant(context, variant)
+                viewModel.showMessage("Launcher icon updated: ${variant.titleEn}")
             },
-            onEquipFrame = { frameId ->
-                viewModel.equipFrame(frameId)
+            onUpdateLayoutPrefs = { nextPrefs ->
+                layoutPrefs = AppAppearanceStore.saveLayoutPrefs(context, nextPrefs)
             },
+            onPreviewOwnProfile = {
+                val me = ownProfile
+                if (me != null) {
+                    viewModel.openProfileViewer(me.userId, me.displayName, me.photoUrl, null)
+                }
+            },
+            onOpenShopForRanks = {
+                settingsModalTab = null
+                showShopDialog = true
+            },
+            onSignOut = { signOut(credentialManager, scope) },
+            onDismiss = { settingsModalTab = null }
+        )
+    }
+
+    // Isolated Standalone P E Y Shop Modal (Ranks, Circular Avatar Frames, Full Card Frames, Profile Videos)
+    if (showShopDialog) {
+        PeyShopDialog(
+            profile = ownProfile,
+            isBusy = isBusy,
+            onActivateFreeTrial = { tier -> viewModel.activateFreeTrial(tier) },
+            onPurchaseRank = { tier -> viewModel.purchaseRank(tier) },
+            onBuyFrame = { frame -> viewModel.purchaseAndEquipFrame(frame) },
+            onEquipFrame = { frameId -> viewModel.equipFrame(frameId) },
+            onBuyCardFrame = { cardFrame -> viewModel.purchaseAndEquipCardFrame(cardFrame) },
+            onEquipCardFrame = { cardFrameId -> viewModel.equipCardFrame(cardFrameId) },
             onBuyProfileEffect = { effect, videoUri, localOnly ->
                 viewModel.purchaseAndEquipProfileEffect(effect, videoUri, localOnly)
             },
@@ -543,8 +678,40 @@ fun CordlyHomeScreen(
                     viewModel.openProfileViewer(me.userId, me.displayName, me.photoUrl, null)
                 }
             },
-            onSignOut = { signOut(credentialManager, scope) },
-            onDismiss = { settingsModalTab = null }
+            onDismiss = { showShopDialog = false }
+        )
+    }
+
+    // Standalone Quests & Ultra Directory Modal ("المهام")
+    if (showQuestsDialog) {
+        QuestsAndUltraDialog(
+            profile = ownProfile,
+            acceptedFriendsCount = acceptedFriends.size,
+            ultraDirectoryMembers = ultraDirectoryMembers,
+            customQuests = customQuests,
+            developerTickets = developerTickets,
+            isBusy = isBusy,
+            onClaimDailyReward = { viewModel.claimDailyReward() },
+            onClaimChannelReward = { enteredChannel -> viewModel.claimChannelReward(enteredChannel) },
+            onCreateCustomQuest = { title, desc, type, target, rewardPerStep ->
+                viewModel.createCustomQuest(title, desc, type, target, rewardPerStep)
+            },
+            onClaimCustomQuest = { quest -> viewModel.claimCustomQuest(quest, acceptedFriends.size) },
+            onSendDeveloperMessage = { subject, message ->
+                viewModel.sendDeveloperMessage(subject, message)
+            },
+            onOpenMemberProfile = { member ->
+                showQuestsDialog = false
+                viewModel.openProfileViewer(member.userId, member.displayName, member.photoUrl) {
+                    val convId = CordlyRepository.deterministicPairId(viewModel.currentUserId, member.userId)
+                    viewModel.openDirectChat(convId)
+                }
+            },
+            onOpenShopForRanks = {
+                showQuestsDialog = false
+                showShopDialog = true
+            },
+            onDismiss = { showQuestsDialog = false }
         )
     }
 
@@ -568,16 +735,36 @@ fun CordlyHomeScreen(
         ActiveCallOverlayDialog(
             call = joinedCall,
             currentUserId = viewModel.currentUserId,
+            currentUserRank = effectiveRank,
             streams = callStreams,
+            inviteableFriends = inviteableFriends,
             onToggleMute = { muted ->
                 viewModel.updateCallMediaState(joinedCall, muted = muted, videoOn = joinedCall.callType == "video")
             },
             onToggleVideo = { videoOn ->
                 viewModel.updateCallMediaState(joinedCall, muted = false, videoOn = videoOn)
             },
-            onPublishStreamSample = { frameData, audioLevel, videoEnabled, muted ->
-                viewModel.publishCallStreamSample(joinedCall, frameData, audioLevel, videoEnabled, muted)
+            onUpdateVideoQuality = { quality ->
+                viewModel.updateCallVideoQuality(joinedCall, quality)
             },
+            onAddParticipant = { friendUid, friendName ->
+                viewModel.addParticipantToCall(joinedCall, friendUid, friendName)
+            },
+            onPublishStreamSample = { frameData, audioData, audioSeq, voiceEffect, faceFilter, videoQuality, audioLevel, videoEnabled, muted ->
+                viewModel.publishCallStreamSample(
+                    call = joinedCall,
+                    frameData = frameData,
+                    audioData = audioData,
+                    audioSeq = audioSeq,
+                    voiceEffect = voiceEffect,
+                    faceFilter = faceFilter,
+                    videoQuality = videoQuality,
+                    audioLevel = audioLevel,
+                    videoEnabled = videoEnabled,
+                    muted = muted
+                )
+            },
+            onStatusToast = { msg -> viewModel.showMessage(msg) },
             onEndCall = {
                 if (joinedCall.targetType == "dm" || joinedCall.callerId == viewModel.currentUserId) {
                     viewModel.endOrDeclineCall(joinedCall, "ended")
@@ -591,9 +778,75 @@ fun CordlyHomeScreen(
 }
 
 @Composable
+private fun WelcomeStatusBanner(
+    state: WelcomeBootstrapState,
+    onDismiss: () -> Unit
+) {
+    val strings = LocalAppStrings.current
+    val isNew = state is WelcomeBootstrapState.NewUserWelcome
+    val name = when (state) {
+        is WelcomeBootstrapState.NewUserWelcome -> state.displayName
+        is WelcomeBootstrapState.ReturningUserWelcomeBack -> state.displayName
+        WelcomeBootstrapState.Hidden -> ""
+    }
+    val accent = if (isNew) CordlyCyan else CordlyAmber
+
+    Surface(
+        color = CordlySurfaceDark,
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.5.dp, accent),
+        tonalElevation = 8.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onDismiss)
+            .testTag(if (isNew) "welcome_new_banner" else "welcome_back_banner")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(CordlyBlurple.copy(alpha = 0.24f), accent.copy(alpha = 0.16f))
+                    )
+                )
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.AutoAwesome,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isNew) "${strings.welcomeNewTitle} $name" else "${strings.welcomeBackTitle} $name",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = CordlyTextPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                if (isNew) {
+                    Text(
+                        text = strings.welcomeBadge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CordlyCyan
+                    )
+                }
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(30.dp)) {
+                Icon(Icons.Rounded.Close, contentDescription = strings.closeButton, tint = CordlyTextSecondary)
+            }
+        }
+    }
+}
+
+@Composable
 private fun WorkspaceSidebar(
     currentUserId: String,
     ownProfile: UserPrivate?,
+    effectiveRank: String,
     destination: ActiveDestination,
     homeTab: Int,
     hasWallpaper: Boolean,
@@ -613,6 +866,7 @@ private fun WorkspaceSidebar(
     onOpenChannel: (Server, String) -> Unit,
     onAddChannelClick: (Server) -> Unit,
     onUpdateServerIcon: (Server, String) -> Unit,
+    onKickMember: (Server, String) -> Unit,
     onStartServerCall: (Server, String, String) -> Unit,
     onJoinOngoingCall: (CallSession) -> Unit,
     onImageError: (String) -> Unit,
@@ -634,6 +888,7 @@ private fun WorkspaceSidebar(
                     HomeHubContent(
                         currentUserId = currentUserId,
                         ownProfile = ownProfile,
+                        effectiveRank = effectiveRank,
                         homeTab = homeTab,
                         friendshipsState = friendshipsState,
                         conversationsState = conversationsState,
@@ -655,6 +910,8 @@ private fun WorkspaceSidebar(
                         ServerChannelsContent(
                             server = server,
                             currentUserId = currentUserId,
+                            isNeoPlus = effectiveRank == CordlyRepository.RANK_NEO_PLUS,
+                            friendships = (friendshipsState as? UiState.Success)?.data.orEmpty(),
                             selectedChannel = destination.channelName,
                             activeServerCall = activeCalls.firstOrNull {
                                 it.targetType == "server" && it.targetId == server.id
@@ -663,6 +920,7 @@ private fun WorkspaceSidebar(
                             onOpenChannel = { ch -> onOpenChannel(server, ch) },
                             onAddChannelClick = { onAddChannelClick(server) },
                             onUpdateServerIcon = { url -> onUpdateServerIcon(server, url) },
+                            onKickMember = { memberUid -> onKickMember(server, memberUid) },
                             onStartVoiceCall = {
                                 onStartServerCall(server, destination.channelName, "voice")
                             },
@@ -698,6 +956,7 @@ private fun WorkspaceSidebar(
 private fun HomeHubContent(
     currentUserId: String,
     ownProfile: UserPrivate?,
+    effectiveRank: String,
     homeTab: Int,
     friendshipsState: UiState<List<Friendship>>,
     conversationsState: UiState<List<Conversation>>,
@@ -814,10 +1073,20 @@ private fun HomeHubContent(
 
         // Discord-style Shareable Friend Code + P E Y Card
         if (ownProfile != null) {
+            val profileThemeColor = remember(ownProfile.profileThemeColorHex, effectiveRank) {
+                if (effectiveRank != CordlyRepository.RANK_NORMAL) {
+                    ownProfile.profileThemeColorHex?.takeIf { it.isNotBlank() }?.let { parseHexColor(it) }
+                } else {
+                    null
+                }
+            }
             Surface(
                 color = CordlyCardSurface,
                 shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, CordlyBlurple.copy(alpha = 0.35f)),
+                border = BorderStroke(
+                    1.2.dp,
+                    (profileThemeColor ?: CordlyBlurple).copy(alpha = 0.55f)
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp)
@@ -841,14 +1110,17 @@ private fun HomeHubContent(
                                 .matchParentSize()
                                 .background(
                                     Brush.horizontalGradient(
-                                        listOf(CordlyBlurple.copy(alpha = 0.18f), CordlyCyan.copy(alpha = 0.10f))
+                                        listOf(
+                                            (profileThemeColor ?: CordlyBlurple).copy(alpha = 0.24f),
+                                            (profileThemeColor ?: CordlyCyan).copy(alpha = 0.12f)
+                                        )
                                     )
                                 )
                         )
                     }
 
                     val hasBannerPhoto = !ownProfile.bannerUrl.isNullOrBlank()
-                    val codeTint = if (hasBannerPhoto) Color(0xFF22D3EE) else CordlyCyan
+                    val codeTint = profileThemeColor ?: if (hasBannerPhoto) Color(0xFF22D3EE) else CordlyCyan
                     val balanceTint = if (hasBannerPhoto) Color(0xFFF0B232) else CordlyAmber
 
                     Row(
@@ -1300,12 +1572,15 @@ private fun AcceptedFriendCard(
 private fun ServerChannelsContent(
     server: Server,
     currentUserId: String,
+    isNeoPlus: Boolean,
+    friendships: List<Friendship>,
     selectedChannel: String,
     activeServerCall: CallSession?,
     onCopyInvite: (String) -> Unit,
     onOpenChannel: (String) -> Unit,
     onAddChannelClick: () -> Unit,
     onUpdateServerIcon: (String) -> Unit,
+    onKickMember: (String) -> Unit,
     onStartVoiceCall: () -> Unit,
     onStartVideoCall: () -> Unit,
     onJoinOngoingCall: (CallSession) -> Unit,
@@ -1316,6 +1591,7 @@ private fun ServerChannelsContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isOwner = server.ownerId == currentUserId
+    var showMembersManage by remember(server.id) { mutableStateOf(false) }
     val accent = parseHexColor(server.accentHex)
     var isUpdatingPhoto by remember(server.id) { mutableStateOf(false) }
 
@@ -1650,6 +1926,86 @@ private fun ServerChannelsContent(
                 }
             }
         }
+
+        // Neo Plus Server Member Kick Management for Server Owners
+        if (isOwner && isNeoPlus && server.memberUids.size > 1) {
+            HorizontalDivider(color = CordlyDivider, thickness = 1.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { showMembersManage = !showMembersManage }
+                        .padding(vertical = 6.dp)
+                        .testTag("neo_plus_server_members_toggle")
+                ) {
+                    Text(
+                        text = "NEO+ Member Control (${server.memberUids.size - 1})",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = CordlyAmber,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (showMembersManage) "Hide" else "Manage",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CordlyCyan
+                    )
+                }
+                AnimatedVisibility(visible = showMembersManage) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val removableUids = server.memberUids.filter { it != server.ownerId }
+                        removableUids.forEach { memberUid ->
+                            val friendMatch = friendships.firstOrNull {
+                                it.requesterId == memberUid || it.recipientId == memberUid
+                            }
+                            val displayName = when {
+                                friendMatch == null -> "Member ${memberUid.take(6)}"
+                                friendMatch.requesterId == memberUid -> friendMatch.requesterName
+                                else -> friendMatch.recipientName
+                            }
+                            Surface(
+                                color = CordlyCardSurface,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = displayName,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = CordlyTextPrimary,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    IconButton(
+                                        onClick = { onKickMember(memberUid) },
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .testTag("kick_member_$memberUid")
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.PersonRemove,
+                                            contentDescription = "Kick $displayName",
+                                            tint = CordlyCrimson,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1659,18 +2015,36 @@ private fun ActiveChatPane(
     showBackButton: Boolean,
     hasWallpaper: Boolean,
     currentUserId: String,
+    currentUserRank: String,
+    compactCards: Boolean,
     conversations: List<Conversation>,
     servers: List<Server>,
     directMessagesState: UiState<List<com.example.data.model.DirectMessage>>,
     serverMessagesState: UiState<List<com.example.data.model.ServerMessage>>,
     onBack: () -> Unit,
-    onSendDirect: (Conversation, String, String?) -> Unit,
-    onDeleteDirect: (String, String) -> Unit,
-    onSendServer: (Server, String, String, String?) -> Unit,
-    onDeleteServer: (String, String) -> Unit,
+    onSendDirect: (
+        conv: Conversation,
+        text: String,
+        replyToText: String?,
+        messageType: String,
+        mediaData: String?,
+        mediaDurationMs: Long?
+    ) -> Unit,
+    onDeleteDirect: (String, String, Boolean) -> Unit,
+    onSendServer: (
+        server: Server,
+        channelName: String,
+        text: String,
+        replyToText: String?,
+        messageType: String,
+        mediaData: String?,
+        mediaDurationMs: Long?
+    ) -> Unit,
+    onDeleteServer: (String, String, Boolean) -> Unit,
     onOpenUserProfile: (userId: String, name: String, photoUrl: String?) -> Unit,
     onStartDirectCall: (calleeId: String, calleeName: String, calleePhoto: String?, convId: String, callType: String) -> Unit,
-    onStartServerCall: (server: Server, channelName: String, callType: String) -> Unit
+    onStartServerCall: (server: Server, channelName: String, callType: String) -> Unit,
+    onStatusToast: (String) -> Unit
 ) {
     val strings = LocalAppStrings.current
     when (activeChat) {
@@ -1702,8 +2076,13 @@ private fun ActiveChatPane(
                             senderId = it.senderId,
                             senderName = it.senderName,
                             senderPhoto = it.senderPhoto,
+                            senderRank = it.senderRank,
                             text = it.text,
+                            messageType = it.messageType,
+                            mediaData = it.mediaData,
+                            mediaDurationMs = it.mediaDurationMs,
                             replyToText = it.replyToText,
+                            deletedForEveryone = it.deletedForEveryone,
                             createdAt = it.createdAt
                         )
                     }
@@ -1716,14 +2095,16 @@ private fun ActiveChatPane(
                 isDirectMessage = true,
                 showBackButton = showBackButton,
                 currentUserId = currentUserId,
+                currentUserRank = currentUserRank,
+                compactCards = compactCards,
                 messagesState = mappedMessages,
                 hasWallpaper = hasWallpaper,
                 onBack = onBack,
-                onSendMessage = { text, reply ->
-                    if (conv != null) onSendDirect(conv, text, reply)
+                onSendMessage = { text, reply, type, data, dur ->
+                    if (conv != null) onSendDirect(conv, text, reply, type, data, dur)
                 },
-                onDeleteMessage = { msgId ->
-                    onDeleteDirect(activeChat.conversationId, msgId)
+                onDeleteMessage = { msgId, forEveryone ->
+                    onDeleteDirect(activeChat.conversationId, msgId, forEveryone)
                 },
                 onUserProfileClick = onOpenUserProfile,
                 onHeaderProfileClick = if (peerId.isNotBlank()) {
@@ -1740,7 +2121,8 @@ private fun ActiveChatPane(
                     { onStartDirectCall(peerId, peerName, peerPhoto, conv.id, "video") }
                 } else {
                     null
-                }
+                },
+                onStatusToast = onStatusToast
             )
         }
         is ActiveChatTarget.ServerChannel -> {
@@ -1755,8 +2137,13 @@ private fun ActiveChatPane(
                             senderId = it.senderId,
                             senderName = it.senderName,
                             senderPhoto = it.senderPhoto,
+                            senderRank = it.senderRank,
                             text = it.text,
+                            messageType = it.messageType,
+                            mediaData = it.mediaData,
+                            mediaDurationMs = it.mediaDurationMs,
                             replyToText = it.replyToText,
+                            deletedForEveryone = it.deletedForEveryone,
                             createdAt = it.createdAt
                         )
                     }
@@ -1769,14 +2156,16 @@ private fun ActiveChatPane(
                 isDirectMessage = false,
                 showBackButton = showBackButton,
                 currentUserId = currentUserId,
+                currentUserRank = currentUserRank,
+                compactCards = compactCards,
                 messagesState = mappedMessages,
                 hasWallpaper = hasWallpaper,
                 onBack = onBack,
-                onSendMessage = { text, reply ->
-                    if (server != null) onSendServer(server, activeChat.channelName, text, reply)
+                onSendMessage = { text, reply, type, data, dur ->
+                    if (server != null) onSendServer(server, activeChat.channelName, text, reply, type, data, dur)
                 },
-                onDeleteMessage = { msgId ->
-                    onDeleteServer(activeChat.serverId, msgId)
+                onDeleteMessage = { msgId, forEveryone ->
+                    onDeleteServer(activeChat.serverId, msgId, forEveryone)
                 },
                 onUserProfileClick = onOpenUserProfile,
                 onStartVoiceCall = if (server != null) {
@@ -1788,7 +2177,8 @@ private fun ActiveChatPane(
                     { onStartServerCall(server, activeChat.channelName, "video") }
                 } else {
                     null
-                }
+                },
+                onStatusToast = onStatusToast
             )
         }
         null -> {

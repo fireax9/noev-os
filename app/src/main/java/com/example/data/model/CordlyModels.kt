@@ -19,13 +19,22 @@ data class UserPrivate(
     val peyPoints: Long = 200L,
     val ownedFrames: List<String> = listOf("none"),
     val equippedFrame: String = "none",
+    val ownedCardFrames: List<String> = listOf("none"),
+    val equippedCardFrame: String = "none",
     val ownedProfileEffects: List<String> = listOf("none"),
     val equippedProfileEffect: String = "none",
     val profileVideoData: String? = null,
+    val avatarVideoData: String? = null,
+    val rank: String = "normal", // "normal" | "ultra" | "neo_plus"
+    val rankExpiresAtMs: Long = 0L,
+    val ultraTrialUsed: Boolean = false,
+    val neoPlusTrialUsed: Boolean = false,
+    val profileThemeColorHex: String? = null,
     val rewardedFriendUids: List<String> = emptyList(),
     val dailyClaimsCount: Long = 0L,
     val lastDailyClaimAtMs: Long = 0L,
     val channelRewardClaimed: Boolean = false,
+    val claimedCustomQuests: List<String> = emptyList(),
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -41,8 +50,13 @@ data class PublicProfile(
     val bannerUrl: String? = null,
     val customStatus: String? = null,
     val equippedFrame: String = "none",
+    val equippedCardFrame: String = "none",
     val equippedProfileEffect: String = "none",
     val profileVideoData: String? = null,
+    val avatarVideoData: String? = null,
+    val rank: String = "normal", // "normal" | "ultra" | "neo_plus"
+    val rankExpiresAtMs: Long = 0L,
+    val profileThemeColorHex: String? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -99,9 +113,15 @@ data class DirectMessage(
     val senderId: String = "",
     val senderName: String = "",
     val senderPhoto: String? = null,
+    val senderRank: String? = null,
     val text: String = "",
+    val messageType: String = "text", // "text" | "image" | "audio" | "sticker" | "gif" | "deleted"
+    val mediaData: String? = null,
+    val mediaDurationMs: Long? = null,
     val replyToText: String? = null,
     val edited: Boolean? = null,
+    val hiddenFor: List<String> = emptyList(),
+    val deletedForEveryone: Boolean? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -144,9 +164,15 @@ data class ServerMessage(
     val senderId: String = "",
     val senderName: String = "",
     val senderPhoto: String? = null,
+    val senderRank: String? = null,
     val text: String = "",
+    val messageType: String = "text", // "text" | "image" | "audio" | "sticker" | "gif" | "deleted"
+    val mediaData: String? = null,
+    val mediaDurationMs: Long? = null,
     val replyToText: String? = null,
     val edited: Boolean? = null,
+    val hiddenFor: List<String> = emptyList(),
+    val deletedForEveryone: Boolean? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
@@ -166,6 +192,7 @@ data class CallSession(
     val channelName: String? = null,
     val callType: String = "voice", // "voice" | "video"
     val status: String = "ringing", // "ringing" | "active" | "ended" | "declined"
+    val videoQuality: String = "480p",
     val callerMuted: Boolean = false,
     val calleeMuted: Boolean = false,
     val callerVideoOn: Boolean = false,
@@ -182,8 +209,42 @@ data class CallStreamFrame(
     val senderName: String = "",
     val participantIds: List<String> = emptyList(),
     val frameData: String? = null,
+    val audioData: String? = null,
+    val audioSeq: Long = 0L,
+    val voiceEffect: String = "normal",
+    val faceFilter: String = "none",
+    val videoQuality: String = "480p",
     val audioLevel: Double = 0.0,
     val videoEnabled: Boolean = false,
     val muted: Boolean = false,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class CustomQuest(
+    @DocumentId val id: String = "",
+    val creatorId: String = "",
+    val creatorName: String = "",
+    val creatorRank: String = "neo_plus",
+    val title: String = "",
+    val description: String = "",
+    val questType: String = "add_friends", // "add_friends" | "daily_check"
+    val targetCount: Long = 5L,
+    val rewardPerStep: Long = 300L,
+    val totalReward: Long = 1500L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class DeveloperTicket(
+    @DocumentId val id: String = "",
+    val senderId: String = "",
+    val senderName: String = "",
+    val senderRank: String = "neo_plus",
+    val subject: String = "",
+    val message: String = "",
+    val status: String = "sent",
+    @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )

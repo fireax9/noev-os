@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.model.CallSession
 import com.example.data.model.CallStreamFrame
 import com.example.data.model.Conversation
+import com.example.data.model.CustomQuest
+import com.example.data.model.DeveloperTicket
 import com.example.data.model.DirectMessage
 import com.example.data.model.Friendship
 import com.example.data.model.LookupKey
@@ -29,6 +31,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
@@ -44,6 +48,12 @@ sealed interface ActiveDestination {
 sealed interface ActiveChatTarget {
     data class DirectChat(val conversationId: String) : ActiveChatTarget
     data class ServerChannel(val serverId: String, val channelName: String) : ActiveChatTarget
+}
+
+sealed interface WelcomeBootstrapState {
+    data object Hidden : WelcomeBootstrapState
+    data class NewUserWelcome(val displayName: String) : WelcomeBootstrapState
+    data class ReturningUserWelcomeBack(val displayName: String) : WelcomeBootstrapState
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -70,6 +80,9 @@ class CordlyViewModel(
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
+    private val _welcomeBanner = MutableStateFlow<WelcomeBootstrapState>(WelcomeBootstrapState.Hidden)
+    val welcomeBanner: StateFlow<WelcomeBootstrapState> = _welcomeBanner.asStateFlow()
+
     data class ProfileViewerTarget(
         val userId: String,
         val fallbackName: String,
@@ -83,17 +96,31 @@ class CordlyViewModel(
     private val _joinedCallId = MutableStateFlow<String?>(null)
     val joinedCallId: StateFlow<String?> = _joinedCallId.asStateFlow()
 
+    private val streamPublishMutex = Mutex()
+    private val lastSentVideoFrameByCall = mutableMapOf<String, String>()
+
     init {
         viewModelScope.launch {
             val firebaseUser = Firebase.auth.currentUser
             if (firebaseUser != null && firebaseUser.uid == currentUserId) {
                 repository.ensureUserProfile(firebaseUser)
+                    .onSuccess { bootstrap ->
+                        _welcomeBanner.value = if (bootstrap.isNewAccount) {
+                            WelcomeBootstrapState.NewUserWelcome(bootstrap.user.displayName)
+                        } else {
+                            WelcomeBootstrapState.ReturningUserWelcomeBack(bootstrap.user.displayName)
+                        }
+                    }
                     .onFailure { err ->
                         Log.w(TAG, "Profile bootstrap failed", err)
                         _snackbarMessage.value = err.localizedMessage ?: "Failed to initialize profile"
                     }
             }
         }
+    }
+
+    fun dismissWelcomeBanner() {
+        _welcomeBanner.value = WelcomeBootstrapState.Hidden
     }
 
     val ownProfile: StateFlow<UiState<UserPrivate?>> = repository.observeOwnProfile(currentUserId)
@@ -123,6 +150,18 @@ class CordlyViewModel(
             emit(UiState.Error(unwrapError(error, "Failed to load servers")))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), UiState.Loading)
+
+    val ultraDirectoryMembers: StateFlow<List<PublicProfile>> = repository.observeUltraDirectory()
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val customQuests: StateFlow<List<CustomQuest>> = repository.observeCustomQuests()
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val developerTickets: StateFlow<List<DeveloperTicket>> = repository.observeDeveloperMessages(currentUserId)
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
     val directMessages: StateFlow<UiState<List<DirectMessage>>> = _activeChat
         .flatMapLatest { target ->
@@ -261,11 +300,10 @@ class CordlyViewModel(
         }
         _isBusy.value = true
         viewModelScope.launch {
-            val alreadyRewarded = profile.rewardedFriendUids.contains(target.userId)
             repository.sendFriendRequest(profile, target)
-                .onSuccess {
-                    _snackbarMessage.value = if (!alreadyRewarded) {
-                        "Friend request sent to ${target.displayName} (+200 P E Y)"
+                .onSuccess { (_, awarded) ->
+                    _snackbarMessage.value = if (awarded > 0L) {
+                        "Friend request sent to ${target.displayName} (+$awarded P E Y)"
                     } else {
                         "Friend request sent to ${target.displayName}"
                     }
@@ -280,15 +318,12 @@ class CordlyViewModel(
     }
 
     fun acceptFriendRequest(friendship: Friendship) {
-        val profile = (ownProfile.value as? UiState.Success)?.data
-        val friendUid = if (friendship.requesterId == currentUserId) friendship.recipientId else friendship.requesterId
-        val alreadyRewarded = profile?.rewardedFriendUids?.contains(friendUid) == true
         _isBusy.value = true
         viewModelScope.launch {
             repository.acceptFriendRequest(friendship)
-                .onSuccess { convId ->
-                    _snackbarMessage.value = if (!alreadyRewarded) {
-                        "You are now friends! +200 P E Y earned!"
+                .onSuccess { (convId, awarded) ->
+                    _snackbarMessage.value = if (awarded > 0L) {
+                        "You are now friends! +$awarded P E Y earned!"
                     } else {
                         "You are now friends! Chat unlocked."
                     }
@@ -329,19 +364,34 @@ class CordlyViewModel(
         }
     }
 
-    fun sendDirectMessage(conversation: Conversation, text: String, replyToText: String? = null) {
+    fun sendDirectMessage(
+        conversation: Conversation,
+        text: String,
+        replyToText: String? = null,
+        messageType: String = "text",
+        mediaData: String? = null,
+        mediaDurationMs: Long? = null
+    ) {
         val profile = (ownProfile.value as? UiState.Success)?.data ?: return
         viewModelScope.launch {
-            repository.sendDirectMessage(conversation, profile, text, replyToText)
+            repository.sendDirectMessage(
+                conversation = conversation,
+                sender = profile,
+                text = text,
+                replyToText = replyToText,
+                messageType = messageType,
+                mediaData = mediaData,
+                mediaDurationMs = mediaDurationMs
+            )
                 .onFailure { err ->
                     _snackbarMessage.value = err.localizedMessage ?: "Failed to send message."
                 }
         }
     }
 
-    fun deleteDirectMessage(conversationId: String, messageId: String) {
+    fun deleteDirectMessage(conversationId: String, messageId: String, forEveryone: Boolean) {
         viewModelScope.launch {
-            repository.deleteDirectMessage(conversationId, messageId)
+            repository.deleteDirectMessage(conversationId, messageId, forEveryone)
                 .onFailure { err ->
                     _snackbarMessage.value = err.localizedMessage ?: "Failed to delete message."
                 }
@@ -373,9 +423,11 @@ class CordlyViewModel(
     }
 
     fun updateServerIcon(server: Server, newIconUrl: String?, newEmoji: String? = null) {
+        val profile = (ownProfile.value as? UiState.Success)?.data
+        val isNeoPlus = CordlyRepository.effectiveRank(profile) == CordlyRepository.RANK_NEO_PLUS
         _isBusy.value = true
         viewModelScope.launch {
-            repository.updateServerIcon(server, newIconUrl, newEmoji)
+            repository.updateServerIcon(server, newIconUrl, newEmoji, isNeoPlusMember = isNeoPlus)
                 .onSuccess {
                     _snackbarMessage.value = "Server icon updated!"
                 }
@@ -418,6 +470,20 @@ class CordlyViewModel(
         }
     }
 
+    fun removeMemberFromServer(server: Server, memberUid: String) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.removeMemberFromServer(server, memberUid)
+                .onSuccess {
+                    _snackbarMessage.value = "Member removed from ${server.name}."
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Failed to remove member."
+                }
+            _isBusy.value = false
+        }
+    }
+
     fun leaveServer(serverId: String) {
         viewModelScope.launch {
             repository.leaveServer(serverId)
@@ -431,19 +497,36 @@ class CordlyViewModel(
         }
     }
 
-    fun sendServerMessage(server: Server, channelName: String, text: String, replyToText: String? = null) {
+    fun sendServerMessage(
+        server: Server,
+        channelName: String,
+        text: String,
+        replyToText: String? = null,
+        messageType: String = "text",
+        mediaData: String? = null,
+        mediaDurationMs: Long? = null
+    ) {
         val profile = (ownProfile.value as? UiState.Success)?.data ?: return
         viewModelScope.launch {
-            repository.sendServerMessage(server, channelName, profile, text, replyToText)
+            repository.sendServerMessage(
+                server = server,
+                channelName = channelName,
+                sender = profile,
+                text = text,
+                replyToText = replyToText,
+                messageType = messageType,
+                mediaData = mediaData,
+                mediaDurationMs = mediaDurationMs
+            )
                 .onFailure { err ->
                     _snackbarMessage.value = err.localizedMessage ?: "Failed to send message."
                 }
         }
     }
 
-    fun deleteServerMessage(serverId: String, messageId: String) {
+    fun deleteServerMessage(serverId: String, messageId: String, forEveryone: Boolean) {
         viewModelScope.launch {
-            repository.deleteServerMessage(serverId, messageId)
+            repository.deleteServerMessage(serverId, messageId, forEveryone)
                 .onFailure { err ->
                     _snackbarMessage.value = err.localizedMessage ?: "Failed to delete message."
                 }
@@ -503,6 +586,64 @@ class CordlyViewModel(
         }
     }
 
+    fun activateFreeTrial(tier: String) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.activateFreeTrial(tier)
+                .onSuccess {
+                    val label = if (tier == CordlyRepository.RANK_NEO_PLUS) "Neo Plus (1 day)" else "Ultra (3 days)"
+                    _snackbarMessage.value = "Free Trial Activated: $label!"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Trial unavailable."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun purchaseRank(tier: String) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.purchaseRank(tier)
+                .onSuccess { remaining ->
+                    val label = if (tier == CordlyRepository.RANK_NEO_PLUS) "Neo Plus" else "Ultra"
+                    _snackbarMessage.value = "Welcome to $label! ($remaining P E Y left)"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Rank purchase failed."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun updateProfileThemeColor(hex: String?) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.updateProfileThemeColor(hex)
+                .onSuccess {
+                    _snackbarMessage.value = if (hex != null) "Profile theme color updated!" else "Profile theme color cleared"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not update profile color."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun updateAvatarVideo(videoDataUri: String?) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.updateAvatarVideo(videoDataUri)
+                .onSuccess {
+                    _snackbarMessage.value = if (videoDataUri != null) "Neo+ Video Avatar saved!" else "Video Avatar cleared."
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not update video avatar."
+                }
+            _isBusy.value = false
+        }
+    }
+
     fun purchaseAndEquipFrame(frame: ProfileFrameItem) {
         _isBusy.value = true
         viewModelScope.launch {
@@ -527,6 +668,35 @@ class CordlyViewModel(
                 }
                 .onFailure { err ->
                     _snackbarMessage.value = err.localizedMessage ?: "Could not equip frame."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun purchaseAndEquipCardFrame(cardFrame: ProfileCardFrameItem) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.purchaseAndEquipCardFrame(cardFrame.id, cardFrame.price)
+                .onSuccess { remaining ->
+                    _snackbarMessage.value = "Equipped Profile Frame: ${cardFrame.title}! ($remaining P E Y left)"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Purchase failed."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun equipCardFrame(cardFrameId: String) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.equipCardFrame(cardFrameId)
+                .onSuccess {
+                    val item = PeyShopCatalog.findCardFrameById(cardFrameId)
+                    _snackbarMessage.value = "Profile Frame equipped: ${item.title}"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not equip profile frame."
                 }
             _isBusy.value = false
         }
@@ -615,6 +785,59 @@ class CordlyViewModel(
                 }
                 .onFailure { err ->
                     _snackbarMessage.value = err.localizedMessage ?: "Could not claim channel reward."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun createCustomQuest(
+        title: String,
+        description: String,
+        questType: String,
+        targetCount: Long,
+        rewardPerStep: Long,
+        onCreated: () -> Unit = {}
+    ) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.createCustomQuest(profile, title, description, questType, targetCount, rewardPerStep)
+                .onSuccess {
+                    _snackbarMessage.value = "Quest published: ${it.title} (+${it.totalReward} P E Y)!"
+                    onCreated()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not create quest."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun claimCustomQuest(quest: CustomQuest, acceptedFriendsCount: Int) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.claimCustomQuest(quest, acceptedFriendsCount)
+                .onSuccess { awarded ->
+                    _snackbarMessage.value = "Quest Complete! +$awarded P E Y added!"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Quest not ready yet."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun sendDeveloperMessage(subject: String, message: String, onSent: () -> Unit = {}) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.sendDeveloperMessage(profile, subject, message)
+                .onSuccess {
+                    _snackbarMessage.value = "Sent directly to the developer!"
+                    onSent()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not send message."
                 }
             _isBusy.value = false
         }
@@ -724,24 +947,63 @@ class CordlyViewModel(
         }
     }
 
+    fun updateCallVideoQuality(call: CallSession, quality: String) {
+        viewModelScope.launch {
+            repository.updateCallVideoQuality(call.id, quality)
+        }
+    }
+
+    fun addParticipantToCall(call: CallSession, friendUid: String, friendName: String) {
+        viewModelScope.launch {
+            repository.addParticipantToCall(call, friendUid)
+                .onSuccess {
+                    _snackbarMessage.value = "Added $friendName to the call!"
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not add participant."
+                }
+        }
+    }
+
     fun publishCallStreamSample(
         call: CallSession,
         frameData: String?,
+        audioData: String?,
+        audioSeq: Long,
+        voiceEffect: String,
+        faceFilter: String,
+        videoQuality: String,
         audioLevel: Double,
         videoEnabled: Boolean,
         muted: Boolean
     ) {
         val profile = (ownProfile.value as? UiState.Success)?.data ?: return
         viewModelScope.launch {
-            repository.publishCallStreamFrame(
-                callId = call.id,
-                sender = profile,
-                participantIds = call.participantIds,
-                frameData = frameData,
-                audioLevel = audioLevel,
-                videoEnabled = videoEnabled,
-                muted = muted
-            )
+            streamPublishMutex.withLock {
+                val frameToSend = if (!videoEnabled) {
+                    lastSentVideoFrameByCall.remove(call.id)
+                    null
+                } else if (!frameData.isNullOrBlank() && lastSentVideoFrameByCall[call.id] != frameData) {
+                    lastSentVideoFrameByCall[call.id] = frameData
+                    frameData
+                } else {
+                    null
+                }
+                repository.publishCallStreamFrame(
+                    callId = call.id,
+                    sender = profile,
+                    participantIds = call.participantIds,
+                    frameData = frameToSend,
+                    audioData = audioData,
+                    audioSeq = audioSeq,
+                    voiceEffect = voiceEffect,
+                    faceFilter = faceFilter,
+                    videoQuality = videoQuality,
+                    audioLevel = audioLevel,
+                    videoEnabled = videoEnabled,
+                    muted = muted
+                )
+            }
         }
     }
 

@@ -7,6 +7,8 @@ import com.example.data.handleFirestoreError
 import com.example.data.model.CallSession
 import com.example.data.model.CallStreamFrame
 import com.example.data.model.Conversation
+import com.example.data.model.CustomQuest
+import com.example.data.model.DeveloperTicket
 import com.example.data.model.DirectMessage
 import com.example.data.model.Friendship
 import com.example.data.model.LookupKey
@@ -24,6 +26,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -34,6 +38,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import java.security.MessageDigest
 import java.util.UUID
+
+data class UserBootstrapResult(
+    val user: UserPrivate,
+    val isNewAccount: Boolean
+)
 
 class CordlyRepository(
     private val db: FirebaseFirestore,
@@ -51,7 +60,7 @@ class CordlyRepository(
             ?: throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
     }
 
-    suspend fun ensureUserProfile(firebaseUser: FirebaseUser): Result<UserPrivate> {
+    suspend fun ensureUserProfile(firebaseUser: FirebaseUser): Result<UserBootstrapResult> {
         val uid = requireUserId()
         require(uid == firebaseUser.uid) { "Authenticated UID mismatch" }
 
@@ -67,10 +76,15 @@ class CordlyRepository(
 
         return try {
             val existingSnapshot = userDocRef.get().await()
+            val isNewAccount = !existingSnapshot.exists()
             val existingUser = existingSnapshot.toObject(
                 UserPrivate::class.java,
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
             )
+
+            val nowMs = System.currentTimeMillis()
+            val resolvedRank = effectiveRank(existingUser, nowMs)
+            val resolvedExpiresAtMs = if (resolvedRank == RANK_NORMAL) 0L else (existingUser?.rankExpiresAtMs ?: 0L)
 
             val friendCode = existingUser?.friendCode?.takeIf { it.isNotBlank() } ?: defaultFriendCode
             val status = existingUser?.status?.takeIf { it.isNotBlank() } ?: "online"
@@ -85,11 +99,15 @@ class CordlyRepository(
             }
             val ownedFrames = existingUser?.ownedFrames?.takeIf { it.isNotEmpty() } ?: listOf("none")
             val equippedFrame = existingUser?.equippedFrame?.takeIf { it.isNotBlank() } ?: "none"
+            val ownedCardFrames = existingUser?.ownedCardFrames?.takeIf { it.isNotEmpty() } ?: listOf("none")
+            val equippedCardFrame = existingUser?.equippedCardFrame?.takeIf { it.isNotBlank() } ?: "none"
             val ownedProfileEffects = existingUser?.ownedProfileEffects?.takeIf { it.isNotEmpty() } ?: listOf("none")
             val equippedProfileEffect = existingUser?.equippedProfileEffect?.takeIf { it.isNotBlank() } ?: "none"
             val profileVideoData = existingUser?.profileVideoData?.takeIf { it.isNotBlank() }
+            val avatarVideoData = existingUser?.avatarVideoData?.takeIf { it.isNotBlank() }
+            val profileThemeColorHex = existingUser?.profileThemeColorHex?.takeIf { it.isNotBlank() }
 
-            if (!existingSnapshot.exists()) {
+            if (isNewAccount) {
                 val privatePayload = buildMap<String, Any> {
                     put("userId", uid)
                     put("email", email)
@@ -101,12 +119,19 @@ class CordlyRepository(
                     put("peyPoints", INITIAL_PEY_POINTS)
                     put("ownedFrames", listOf("none"))
                     put("equippedFrame", "none")
+                    put("ownedCardFrames", listOf("none"))
+                    put("equippedCardFrame", "none")
                     put("ownedProfileEffects", listOf("none"))
                     put("equippedProfileEffect", "none")
+                    put("rank", RANK_NORMAL)
+                    put("rankExpiresAtMs", 0L)
+                    put("ultraTrialUsed", false)
+                    put("neoPlusTrialUsed", false)
                     put("rewardedFriendUids", emptyList<String>())
                     put("dailyClaimsCount", 0L)
                     put("lastDailyClaimAtMs", 0L)
                     put("channelRewardClaimed", false)
+                    put("claimedCustomQuests", emptyList<String>())
                     put("createdAt", FieldValue.serverTimestamp())
                     put("updatedAt", FieldValue.serverTimestamp())
                 }
@@ -123,9 +148,15 @@ class CordlyRepository(
                     put("peyPoints", initialPeyPoints)
                     put("ownedFrames", ownedFrames)
                     put("equippedFrame", equippedFrame)
+                    put("ownedCardFrames", ownedCardFrames)
+                    put("equippedCardFrame", equippedCardFrame)
                     put("ownedProfileEffects", ownedProfileEffects)
                     put("equippedProfileEffect", equippedProfileEffect)
                     if (profileVideoData != null) put("profileVideoData", profileVideoData)
+                    if (avatarVideoData != null) put("avatarVideoData", avatarVideoData)
+                    put("rank", resolvedRank)
+                    put("rankExpiresAtMs", resolvedExpiresAtMs)
+                    if (profileThemeColorHex != null) put("profileThemeColorHex", profileThemeColorHex)
                     put("updatedAt", FieldValue.serverTimestamp())
                 }
                 userDocRef.update(updatePayload).await()
@@ -142,8 +173,13 @@ class CordlyRepository(
                     if (bannerUrl != null) put("bannerUrl", bannerUrl)
                     if (customStatus != null) put("customStatus", customStatus)
                     put("equippedFrame", equippedFrame)
+                    put("equippedCardFrame", equippedCardFrame)
                     put("equippedProfileEffect", equippedProfileEffect)
                     if (profileVideoData != null) put("profileVideoData", profileVideoData)
+                    if (avatarVideoData != null) put("avatarVideoData", avatarVideoData)
+                    put("rank", resolvedRank)
+                    put("rankExpiresAtMs", resolvedExpiresAtMs)
+                    if (profileThemeColorHex != null) put("profileThemeColorHex", profileThemeColorHex)
                     put("createdAt", FieldValue.serverTimestamp())
                     put("updatedAt", FieldValue.serverTimestamp())
                 }
@@ -157,14 +193,18 @@ class CordlyRepository(
                     if (bannerUrl != null) put("bannerUrl", bannerUrl)
                     if (customStatus != null) put("customStatus", customStatus)
                     put("equippedFrame", equippedFrame)
+                    put("equippedCardFrame", equippedCardFrame)
                     put("equippedProfileEffect", equippedProfileEffect)
                     if (profileVideoData != null) put("profileVideoData", profileVideoData)
+                    if (avatarVideoData != null) put("avatarVideoData", avatarVideoData)
+                    put("rank", resolvedRank)
+                    put("rankExpiresAtMs", resolvedExpiresAtMs)
+                    if (profileThemeColorHex != null) put("profileThemeColorHex", profileThemeColorHex)
                     put("updatedAt", FieldValue.serverTimestamp())
                 }
                 publicDocRef.update(publicUpdate).await()
             }
 
-            // Upsert privacy-safe lookup keys (email SHA-256 + friend code)
             upsertLookupKey("email_${sha256(email.lowercase())}", uid, finalName, friendCode, finalPhotoUrl)
             upsertLookupKey("code_${friendCode.uppercase()}", uid, finalName, friendCode, finalPhotoUrl)
 
@@ -184,16 +224,28 @@ class CordlyRepository(
                 peyPoints = initialPeyPoints,
                 ownedFrames = ownedFrames,
                 equippedFrame = equippedFrame,
+                ownedCardFrames = ownedCardFrames,
+                equippedCardFrame = equippedCardFrame,
                 ownedProfileEffects = ownedProfileEffects,
                 equippedProfileEffect = equippedProfileEffect,
                 profileVideoData = profileVideoData,
+                avatarVideoData = avatarVideoData,
+                rank = resolvedRank,
+                rankExpiresAtMs = resolvedExpiresAtMs,
+                ultraTrialUsed = existingUser?.ultraTrialUsed ?: false,
+                neoPlusTrialUsed = existingUser?.neoPlusTrialUsed ?: false,
+                profileThemeColorHex = profileThemeColorHex,
                 dailyClaimsCount = existingUser?.dailyClaimsCount ?: 0L,
                 lastDailyClaimAtMs = existingUser?.lastDailyClaimAtMs ?: 0L,
                 channelRewardClaimed = existingUser?.channelRewardClaimed ?: false,
+                claimedCustomQuests = existingUser?.claimedCustomQuests ?: emptyList(),
                 createdAt = Timestamp.now(),
                 updatedAt = Timestamp.now()
             )
-            Result.success(refreshed)
+            if (isOwnerChannelNameMatch(finalName)) {
+                tryAwardFirstOwnerPeyBonus(uid)
+            }
+            Result.success(UserBootstrapResult(user = refreshed, isNewAccount = isNewAccount))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -301,6 +353,207 @@ class CordlyRepository(
                 upsertLookupKey("email_${sha256(current.email.lowercase())}", uid, trimmedName, current.friendCode, nextPhoto)
                 upsertLookupKey("code_${current.friendCode.uppercase()}", uid, trimmedName, current.friendCode, nextPhoto)
             }
+            if (isOwnerChannelNameMatch(trimmedName)) {
+                tryAwardFirstOwnerPeyBonus(uid)
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun tryAwardFirstOwnerPeyBonus(uid: String) {
+        val lockRef = db.collection("app_meta").document("owner_name_reward")
+        val userRef = db.collection("users").document(uid)
+        try {
+            db.runTransaction { tx ->
+                val lockSnap = tx.get(lockRef)
+                if (!lockSnap.exists()) {
+                    val userSnap = tx.get(userRef)
+                    val currentPey = userSnap.getLong("peyPoints") ?: 0L
+                    tx.set(
+                        lockRef,
+                        mapOf(
+                            "claimedBy" to uid,
+                            "claimedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                    tx.update(
+                        userRef,
+                        mapOf(
+                            "peyPoints" to (currentPey + OWNER_NAME_REWARD_PEY),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    )
+                }
+            }.await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Silently ignore if already claimed or lock cannot be acquired
+        }
+    }
+
+    suspend fun activateFreeTrial(tier: String, nowMs: Long = System.currentTimeMillis()): Result<String> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        val publicRef = db.collection("public_profiles").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+
+            val durationMs: Long
+            val updateMap = mutableMapOf<String, Any>(
+                "rank" to tier,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            when (tier) {
+                RANK_ULTRA -> {
+                    if (current.ultraTrialUsed) {
+                        return Result.failure(IllegalStateException("Ultra 3-day free trial already used."))
+                    }
+                    durationMs = ULTRA_TRIAL_DAYS * ONE_DAY_MS
+                    updateMap["ultraTrialUsed"] = true
+                }
+                RANK_NEO_PLUS -> {
+                    if (current.neoPlusTrialUsed) {
+                        return Result.failure(IllegalStateException("Neo Plus 1-day free trial already used."))
+                    }
+                    durationMs = NEO_PLUS_TRIAL_DAYS * ONE_DAY_MS
+                    updateMap["neoPlusTrialUsed"] = true
+                }
+                else -> return Result.failure(IllegalArgumentException("Unknown rank tier"))
+            }
+
+            val expiresAt = nowMs + durationMs
+            updateMap["rankExpiresAtMs"] = expiresAt
+            userRef.update(updateMap).await()
+            publicRef.update(
+                mapOf(
+                    "rank" to tier,
+                    "rankExpiresAtMs" to expiresAt,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(tier)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun purchaseRank(tier: String, nowMs: Long = System.currentTimeMillis()): Result<Long> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        val publicRef = db.collection("public_profiles").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+
+            val cost = when (tier) {
+                RANK_ULTRA -> ULTRA_COST_PEY
+                RANK_NEO_PLUS -> NEO_PLUS_COST_PEY
+                else -> return Result.failure(IllegalArgumentException("Invalid rank"))
+            }
+            if (current.peyPoints < cost) {
+                return Result.failure(IllegalStateException("Not enough P E Y! Need $cost P E Y."))
+            }
+
+            val baseTime = if (effectiveRank(current, nowMs) == tier && current.rankExpiresAtMs > nowMs) {
+                current.rankExpiresAtMs
+            } else {
+                nowMs
+            }
+            val expiresAt = baseTime + RANK_DURATION_MS
+            val remaining = current.peyPoints - cost
+
+            userRef.update(
+                mapOf(
+                    "peyPoints" to remaining,
+                    "rank" to tier,
+                    "rankExpiresAtMs" to expiresAt,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            publicRef.update(
+                mapOf(
+                    "rank" to tier,
+                    "rankExpiresAtMs" to expiresAt,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(remaining)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateProfileThemeColor(hex: String?): Result<Unit> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        val publicRef = db.collection("public_profiles").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+            val activeRank = effectiveRank(current)
+            if (activeRank == RANK_NORMAL) {
+                return Result.failure(IllegalStateException("Ultra or Neo Plus rank required for full profile colors."))
+            }
+            val cleanHex = hex?.trim()?.take(12)?.takeIf { it.startsWith("#") }
+            val privateMap = mutableMapOf<String, Any>("updatedAt" to FieldValue.serverTimestamp())
+            val publicMap = mutableMapOf<String, Any>("updatedAt" to FieldValue.serverTimestamp())
+            if (cleanHex != null) {
+                privateMap["profileThemeColorHex"] = cleanHex
+                publicMap["profileThemeColorHex"] = cleanHex
+            } else {
+                privateMap["profileThemeColorHex"] = FieldValue.delete()
+                publicMap["profileThemeColorHex"] = FieldValue.delete()
+            }
+            userRef.update(privateMap).await()
+            publicRef.update(publicMap).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateAvatarVideo(videoDataUri: String?): Result<Unit> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        val publicRef = db.collection("public_profiles").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+            if (effectiveRank(current) != RANK_NEO_PLUS) {
+                return Result.failure(IllegalStateException("Neo Plus rank required for Video Avatar."))
+            }
+            val safe = videoDataUri?.takeIf { it.isNotBlank() && it.length <= 740_000 }
+            val privateMap = mutableMapOf<String, Any>("updatedAt" to FieldValue.serverTimestamp())
+            val publicMap = mutableMapOf<String, Any>("updatedAt" to FieldValue.serverTimestamp())
+            if (safe != null) {
+                privateMap["avatarVideoData"] = safe
+                publicMap["avatarVideoData"] = safe
+            } else {
+                privateMap["avatarVideoData"] = FieldValue.delete()
+                publicMap["avatarVideoData"] = FieldValue.delete()
+            }
+            userRef.update(privateMap).await()
+            publicRef.update(publicMap).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
@@ -322,16 +575,10 @@ class CordlyRepository(
             val owned = current.ownedFrames.ifEmpty { listOf("none") }
             if (owned.contains(frameId)) {
                 userRef.update(
-                    mapOf(
-                        "equippedFrame" to frameId,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
+                    mapOf("equippedFrame" to frameId, "updatedAt" to FieldValue.serverTimestamp())
                 ).await()
                 publicRef.update(
-                    mapOf(
-                        "equippedFrame" to frameId,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
+                    mapOf("equippedFrame" to frameId, "updatedAt" to FieldValue.serverTimestamp())
                 ).await()
                 return Result.success(current.peyPoints)
             }
@@ -341,7 +588,7 @@ class CordlyRepository(
             }
 
             val updatedBalance = current.peyPoints - cost
-            val updatedFrames = (owned + frameId).distinct().take(30)
+            val updatedFrames = (owned + frameId).distinct().take(40)
 
             userRef.update(
                 mapOf(
@@ -381,16 +628,89 @@ class CordlyRepository(
                 "Unlock this frame in the P E Y Shop first."
             }
             userRef.update(
+                mapOf("equippedFrame" to frameId, "updatedAt" to FieldValue.serverTimestamp())
+            ).await()
+            publicRef.update(
+                mapOf("equippedFrame" to frameId, "updatedAt" to FieldValue.serverTimestamp())
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun purchaseAndEquipCardFrame(cardFrameId: String, cost: Long): Result<Long> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        val publicRef = db.collection("public_profiles").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+
+            val owned = current.ownedCardFrames.ifEmpty { listOf("none") }
+            if (owned.contains(cardFrameId)) {
+                userRef.update(
+                    mapOf("equippedCardFrame" to cardFrameId, "updatedAt" to FieldValue.serverTimestamp())
+                ).await()
+                publicRef.update(
+                    mapOf("equippedCardFrame" to cardFrameId, "updatedAt" to FieldValue.serverTimestamp())
+                ).await()
+                return Result.success(current.peyPoints)
+            }
+
+            if (current.peyPoints < cost) {
+                return Result.failure(IllegalStateException("Not enough P E Y points! Need $cost P E Y."))
+            }
+
+            val updatedBalance = current.peyPoints - cost
+            val updatedCardFrames = (owned + cardFrameId).distinct().take(40)
+
+            userRef.update(
                 mapOf(
-                    "equippedFrame" to frameId,
+                    "peyPoints" to updatedBalance,
+                    "ownedCardFrames" to updatedCardFrames,
+                    "equippedCardFrame" to cardFrameId,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
+
             publicRef.update(
                 mapOf(
-                    "equippedFrame" to frameId,
+                    "equippedCardFrame" to cardFrameId,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
+            ).await()
+
+            Result.success(updatedBalance)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun equipCardFrame(cardFrameId: String): Result<Unit> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        val publicRef = db.collection("public_profiles").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+            val owned = current.ownedCardFrames.ifEmpty { listOf("none") }
+            require(cardFrameId == "none" || owned.contains(cardFrameId)) {
+                "Unlock this profile card frame in the P E Y Shop first."
+            }
+            userRef.update(
+                mapOf("equippedCardFrame" to cardFrameId, "updatedAt" to FieldValue.serverTimestamp())
+            ).await()
+            publicRef.update(
+                mapOf("equippedCardFrame" to cardFrameId, "updatedAt" to FieldValue.serverTimestamp())
             ).await()
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -421,7 +741,7 @@ class CordlyRepository(
             }
 
             val updatedBalance = if (isAlreadyOwned) current.peyPoints else current.peyPoints - cost
-            val updatedEffects = if (isAlreadyOwned) owned else (owned + effectId).distinct().take(30)
+            val updatedEffects = if (isAlreadyOwned) owned else (owned + effectId).distinct().take(40)
             val safeVideoData = videoDataUri?.takeIf { it.isNotBlank() && it.length <= 740_000 }
 
             val privateUpdate = mutableMapOf<String, Any>(
@@ -463,7 +783,7 @@ class CordlyRepository(
                 ?: throw IllegalStateException("Profile not found")
             val owned = current.ownedProfileEffects.ifEmpty { listOf("none") }
             require(effectId == "none" || owned.contains(effectId)) {
-                "Unlock this 5s profile animation in the P E Y Shop first."
+                "Unlock this video effect in the P E Y Shop first."
             }
             val safeVideoData = videoDataUri?.takeIf { it.isNotBlank() && it.length <= 740_000 }
 
@@ -494,17 +814,18 @@ class CordlyRepository(
         }
     }
 
-    private suspend fun rewardFriendPointsIfEligible(friendUid: String): Boolean {
+    private suspend fun rewardFriendPointsIfEligible(friendUid: String): Long {
         val uid = requireUserId()
-        if (friendUid.isBlank() || friendUid == uid) return false
+        if (friendUid.isBlank() || friendUid == uid) return 0L
         val userRef = db.collection("users").document(uid)
         return try {
             val snap = userRef.get().await()
-            val current = snap.toObject(UserPrivate::class.java) ?: return false
+            val current = snap.toObject(UserPrivate::class.java) ?: return 0L
             if (current.rewardedFriendUids.contains(friendUid) || current.rewardedFriendUids.size >= 200) {
-                return false
+                return 0L
             }
-            val nextBalance = current.peyPoints + FRIEND_REWARD_PEY_POINTS
+            val awarded = FRIEND_REWARD_PEY_POINTS + neoPlusRewardBonus(current)
+            val nextBalance = current.peyPoints + awarded
             val nextRewarded = (current.rewardedFriendUids + friendUid).distinct().take(200)
             userRef.update(
                 mapOf(
@@ -513,11 +834,11 @@ class CordlyRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
-            true
+            awarded
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            false
+            0L
         }
     }
 
@@ -540,7 +861,8 @@ class CordlyRepository(
                 )
             }
 
-            val nextBalance = current.peyPoints + status.nextRewardAmount
+            val totalAward = status.nextRewardAmount + neoPlusRewardBonus(current, nowMs)
+            val nextBalance = current.peyPoints + totalAward
             userRef.update(
                 mapOf(
                     "peyPoints" to nextBalance,
@@ -549,7 +871,7 @@ class CordlyRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
-            Result.success(status.nextRewardAmount)
+            Result.success(totalAward)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -576,7 +898,8 @@ class CordlyRepository(
                     IllegalStateException("Channel bonus ($CREATOR_CHANNEL_NAME) already claimed!")
                 )
             }
-            val nextBalance = current.peyPoints + CHANNEL_REWARD_PEY_POINTS
+            val totalAward = CHANNEL_REWARD_PEY_POINTS + neoPlusRewardBonus(current)
+            val nextBalance = current.peyPoints + totalAward
             userRef.update(
                 mapOf(
                     "peyPoints" to nextBalance,
@@ -584,11 +907,197 @@ class CordlyRepository(
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
             ).await()
-            Result.success(CHANNEL_REWARD_PEY_POINTS)
+            Result.success(totalAward)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    fun observeUltraDirectory(): Flow<List<PublicProfile>> = flow {
+        val path = "public_profiles"
+        emitAll(
+            db.collection(path)
+                .whereIn("rank", listOf(RANK_ULTRA, RANK_NEO_PLUS))
+                .snapshots()
+                .map { snap ->
+                    val nowMs = System.currentTimeMillis()
+                    snap.toObjects(PublicProfile::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .filter { effectiveRank(it, nowMs) != RANK_NORMAL }
+                        .sortedWith(
+                            compareByDescending<PublicProfile> {
+                                if (effectiveRank(it, nowMs) == RANK_NEO_PLUS) 2 else 1
+                            }.thenBy { it.displayName.lowercase() }
+                        )
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, auth.currentUser?.uid ?: "")
+                    throw error
+                }
+        )
+    }
+
+    fun observeCustomQuests(): Flow<List<CustomQuest>> = flow {
+        val path = "custom_quests"
+        emitAll(
+            db.collection(path)
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(30)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CustomQuest::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, auth.currentUser?.uid ?: "")
+                    throw error
+                }
+        )
+    }
+
+    suspend fun createCustomQuest(
+        creator: UserPrivate,
+        title: String,
+        description: String,
+        questType: String,
+        targetCount: Long,
+        rewardPerStep: Long
+    ): Result<CustomQuest> {
+        val uid = requireUserId()
+        if (effectiveRank(creator) != RANK_NEO_PLUS) {
+            return Result.failure(IllegalStateException("Only Neo Plus members can create custom quests."))
+        }
+        val cleanTitle = title.trim().take(120)
+        require(cleanTitle.length >= 2) { "Quest title must be at least 2 characters." }
+        val safeTarget = targetCount.coerceIn(1L, 50L)
+        val safePerStep = rewardPerStep.coerceIn(50L, 1000L)
+        val total = (safeTarget * safePerStep).coerceIn(50L, 10000L)
+        val safeDesc = description.trim().take(300)
+        val safeType = if (questType == "daily_check") "daily_check" else "add_friends"
+
+        val ref = db.collection("custom_quests").document()
+        return try {
+            val payload = buildMap<String, Any> {
+                put("creatorId", uid)
+                put("creatorName", creator.displayName.take(60).ifBlank { "Neo+ Member" })
+                put("creatorRank", RANK_NEO_PLUS)
+                put("title", cleanTitle)
+                if (safeDesc.isNotBlank()) put("description", safeDesc)
+                put("questType", safeType)
+                put("targetCount", safeTarget)
+                put("rewardPerStep", safePerStep)
+                put("totalReward", total)
+                put("createdAt", FieldValue.serverTimestamp())
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
+            ref.set(payload).await()
+            Result.success(
+                CustomQuest(
+                    id = ref.id,
+                    creatorId = uid,
+                    creatorName = creator.displayName,
+                    creatorRank = RANK_NEO_PLUS,
+                    title = cleanTitle,
+                    description = safeDesc,
+                    questType = safeType,
+                    targetCount = safeTarget,
+                    rewardPerStep = safePerStep,
+                    totalReward = total,
+                    createdAt = Timestamp.now(),
+                    updatedAt = Timestamp.now()
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, ref.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun claimCustomQuest(quest: CustomQuest, acceptedFriendsCount: Int): Result<Long> {
+        val uid = requireUserId()
+        val userRef = db.collection("users").document(uid)
+        return try {
+            val snap = userRef.get().await()
+            val current = snap.toObject(UserPrivate::class.java)
+                ?: throw IllegalStateException("Profile not found")
+            if (current.claimedCustomQuests.contains(quest.id)) {
+                return Result.failure(IllegalStateException("You already claimed this quest reward."))
+            }
+            if (quest.questType == "add_friends" && acceptedFriendsCount < quest.targetCount) {
+                return Result.failure(
+                    IllegalStateException("Add ${quest.targetCount - acceptedFriendsCount} more friends to claim!")
+                )
+            }
+            val totalAward = quest.totalReward + neoPlusRewardBonus(current)
+            val nextBalance = current.peyPoints + totalAward
+            val nextClaimed = (current.claimedCustomQuests + quest.id).distinct().take(200)
+            userRef.update(
+                mapOf(
+                    "peyPoints" to nextBalance,
+                    "claimedCustomQuests" to nextClaimed,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(totalAward)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    fun observeDeveloperMessages(uid: String): Flow<List<DeveloperTicket>> = flow {
+        val path = "dev_messages"
+        emitAll(
+            db.collection(path)
+                .whereEqualTo("senderId", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(DeveloperTicket::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, uid)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun sendDeveloperMessage(
+        sender: UserPrivate,
+        subject: String,
+        message: String
+    ): Result<Unit> {
+        val uid = requireUserId()
+        if (effectiveRank(sender) != RANK_NEO_PLUS) {
+            return Result.failure(IllegalStateException("Only Neo Plus members can contact the developer directly."))
+        }
+        val cleanSub = subject.trim().take(120)
+        val cleanMsg = message.trim().take(1500)
+        require(cleanSub.length >= 2 && cleanMsg.length >= 2) { "Subject and message are required." }
+
+        val ref = db.collection("dev_messages").document()
+        return try {
+            val payload = mapOf(
+                "senderId" to uid,
+                "senderName" to sender.displayName.take(60).ifBlank { "Neo+ User" },
+                "senderRank" to RANK_NEO_PLUS,
+                "subject" to cleanSub,
+                "message" to cleanMsg,
+                "status" to "sent",
+                "createdAt" to FieldValue.serverTimestamp(),
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            ref.set(payload).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, ref.path, auth)
             Result.failure(e)
         }
     }
@@ -662,7 +1171,7 @@ class CordlyRepository(
         )
     }
 
-    suspend fun sendFriendRequest(currentUser: UserPrivate, target: LookupKey): Result<String> {
+    suspend fun sendFriendRequest(currentUser: UserPrivate, target: LookupKey): Result<Pair<String, Long>> {
         val uid = requireUserId()
         require(target.userId != uid) { "You cannot add yourself as a friend." }
 
@@ -672,7 +1181,7 @@ class CordlyRepository(
         return try {
             val existing = docRef.get().await()
             if (existing.exists()) {
-                return Result.success(friendshipId)
+                return Result.success(friendshipId to 0L)
             }
             val payload = buildMap<String, Any> {
                 put("participantIds", listOf(uid, target.userId).sorted())
@@ -689,8 +1198,8 @@ class CordlyRepository(
                 put("updatedAt", FieldValue.serverTimestamp())
             }
             docRef.set(payload).await()
-            rewardFriendPointsIfEligible(target.userId)
-            Result.success(friendshipId)
+            val awarded = rewardFriendPointsIfEligible(target.userId)
+            Result.success(friendshipId to awarded)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -699,7 +1208,7 @@ class CordlyRepository(
         }
     }
 
-    suspend fun acceptFriendRequest(friendship: Friendship): Result<String> {
+    suspend fun acceptFriendRequest(friendship: Friendship): Result<Pair<String, Long>> {
         val uid = requireUserId()
         require(friendship.id.isNotBlank()) { "Friendship ID cannot be blank" }
         val friendshipRef = db.collection("friendships").document(friendship.id)
@@ -715,7 +1224,7 @@ class CordlyRepository(
             ).await()
 
             val friendUid = if (friendship.requesterId == uid) friendship.recipientId else friendship.requesterId
-            rewardFriendPointsIfEligible(friendUid)
+            val awarded = rewardFriendPointsIfEligible(friendUid)
 
             val convSnap = convRef.get().await()
             if (!convSnap.exists()) {
@@ -733,7 +1242,7 @@ class CordlyRepository(
                 }
                 convRef.set(convPayload).await()
             }
-            Result.success(convId)
+            Result.success(convId to awarded)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -816,6 +1325,7 @@ class CordlyRepository(
                 .snapshots()
                 .map { snap ->
                     snap.toObjects(DirectMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .filter { !it.hiddenFor.contains(uid) }
                         .sortedBy { it.createdAt ?: Timestamp(0, 0) }
                 }
                 .catch { error ->
@@ -829,15 +1339,28 @@ class CordlyRepository(
         conversation: Conversation,
         sender: UserPrivate,
         text: String,
-        replyToText: String? = null
+        replyToText: String? = null,
+        messageType: String = "text",
+        mediaData: String? = null,
+        mediaDurationMs: Long? = null
     ): Result<String> {
         val uid = requireUserId()
+        val safeMedia = mediaData?.take(495_000)?.takeIf { it.isNotBlank() }
         val cleanText = text.trim().take(2000)
-        require(cleanText.isNotEmpty()) { "Message text cannot be empty" }
+        require(cleanText.isNotEmpty() || safeMedia != null) { "Message cannot be empty" }
+
+        val previewLabel = when (messageType) {
+            "image" -> if (cleanText.isNotEmpty()) "📷 $cleanText" else "📷 Photo"
+            "audio" -> "🎤 Voice message"
+            "sticker" -> "✨ Sticker"
+            "gif" -> "🎞️ GIF"
+            else -> cleanText
+        }
 
         val msgRef = db.collection("conversations").document(conversation.id)
             .collection("messages").document()
         val convRef = db.collection("conversations").document(conversation.id)
+        val senderRank = effectiveRank(sender)
 
         return try {
             val msgPayload = buildMap<String, Any> {
@@ -846,9 +1369,15 @@ class CordlyRepository(
                 put("senderId", uid)
                 put("senderName", sender.displayName)
                 if (sender.photoUrl != null) put("senderPhoto", sender.photoUrl)
+                put("senderRank", senderRank)
                 put("text", cleanText)
+                put("messageType", messageType)
+                if (safeMedia != null) put("mediaData", safeMedia)
+                if (mediaDurationMs != null && mediaDurationMs > 0L) put("mediaDurationMs", mediaDurationMs)
                 val cleanReply = replyToText?.trim()?.take(200)
                 if (!cleanReply.isNullOrEmpty()) put("replyToText", cleanReply)
+                put("hiddenFor", emptyList<String>())
+                put("deletedForEveryone", false)
                 put("createdAt", FieldValue.serverTimestamp())
                 put("updatedAt", FieldValue.serverTimestamp())
             }
@@ -856,7 +1385,7 @@ class CordlyRepository(
 
             convRef.update(
                 mapOf(
-                    "lastMessageText" to cleanText.take(500),
+                    "lastMessageText" to previewLabel.take(500),
                     "lastMessageSenderId" to uid,
                     "updatedAt" to FieldValue.serverTimestamp()
                 )
@@ -870,17 +1399,69 @@ class CordlyRepository(
         }
     }
 
-    suspend fun deleteDirectMessage(conversationId: String, messageId: String): Result<Unit> {
-        requireUserId()
-        val ref = db.collection("conversations").document(conversationId)
+    suspend fun deleteDirectMessage(
+        conversationId: String,
+        messageId: String,
+        forEveryone: Boolean
+    ): Result<Unit> {
+        val uid = requireUserId()
+        val msgRef = db.collection("conversations").document(conversationId)
             .collection("messages").document(messageId)
+        val convRef = db.collection("conversations").document(conversationId)
         return try {
-            ref.delete().await()
+            if (forEveryone) {
+                msgRef.update(
+                    mapOf(
+                        "deletedForEveryone" to true,
+                        "messageType" to "deleted",
+                        "text" to "",
+                        "mediaData" to FieldValue.delete(),
+                        "mediaDurationMs" to FieldValue.delete(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+
+                // Recompute latest visible message so conversation list doesn't retain deleted message preview
+                val msgsSnap = db.collection("conversations").document(conversationId)
+                    .collection("messages")
+                    .whereArrayContains("participantIds", uid)
+                    .get()
+                    .await()
+                val latestValid = msgsSnap.toObjects(
+                    DirectMessage::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+                    .filter { it.id != messageId && it.deletedForEveryone != true && it.messageType != "deleted" }
+                    .maxByOrNull { it.createdAt?.seconds ?: 0L }
+
+                val nextPreview = when (latestValid?.messageType) {
+                    null -> ""
+                    "image" -> if (latestValid.text.isNotBlank()) "📷 ${latestValid.text}" else "📷 Photo"
+                    "audio" -> "🎤 Voice message"
+                    "sticker" -> "✨ Sticker"
+                    "gif" -> "🎞️ GIF"
+                    else -> latestValid.text.take(500)
+                }
+                convRef.update(
+                    mapOf(
+                        "lastMessageText" to nextPreview,
+                        "lastMessageSenderId" to (latestValid?.senderId ?: uid),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } else {
+                msgRef.update(
+                    mapOf(
+                        "hiddenFor" to FieldValue.arrayUnion(uid),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, ref.path, auth)
+            handleFirestoreError(e, OperationType.UPDATE, msgRef.path, auth)
             Result.failure(e)
         }
     }
@@ -957,7 +1538,6 @@ class CordlyRepository(
             serverRef.set(serverPayload).await()
             inviteRef.set(invitePayload).await()
 
-            // Register server name lookup so friends can join by typing the Server Name alone
             val existingNameDoc = nameLookupRef.get().await()
             if (!existingNameDoc.exists() || existingNameDoc.getString("ownerId") == uid) {
                 val nameInvitePayload = buildMap<String, Any> {
@@ -1001,9 +1581,14 @@ class CordlyRepository(
         }
     }
 
-    suspend fun updateServerIcon(server: Server, newIconUrl: String?, newEmoji: String? = null): Result<Unit> {
+    suspend fun updateServerIcon(
+        server: Server,
+        newIconUrl: String?,
+        newEmoji: String? = null,
+        isNeoPlusMember: Boolean = false
+    ): Result<Unit> {
         val uid = requireUserId()
-        require(server.ownerId == uid) { "Only the server owner can change the server icon." }
+        require(server.ownerId == uid || isNeoPlusMember) { "Only the server owner or Neo+ can edit server." }
         val serverRef = db.collection("servers").document(server.id)
         val nextEmoji = newEmoji?.trim()?.take(16)?.ifBlank { server.iconEmoji } ?: server.iconEmoji
         val nextUrl = newIconUrl?.take(120000)?.takeIf { it.isNotBlank() }
@@ -1020,21 +1605,23 @@ class CordlyRepository(
             }
             serverRef.update(serverUpdate).await()
 
-            val inviteUpdate = mutableMapOf<String, Any>(
-                "iconEmoji" to nextEmoji,
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-            if (nextUrl != null) {
-                inviteUpdate["iconUrl"] = nextUrl
-            } else {
-                inviteUpdate["iconUrl"] = FieldValue.delete()
-            }
-            db.collection("server_invites").document(server.inviteCode).update(inviteUpdate).await()
+            if (server.ownerId == uid) {
+                val inviteUpdate = mutableMapOf<String, Any>(
+                    "iconEmoji" to nextEmoji,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                if (nextUrl != null) {
+                    inviteUpdate["iconUrl"] = nextUrl
+                } else {
+                    inviteUpdate["iconUrl"] = FieldValue.delete()
+                }
+                db.collection("server_invites").document(server.inviteCode).update(inviteUpdate).await()
 
-            val nameRef = db.collection("server_invites").document(serverNameLookupKey(server.name))
-            val nameSnap = nameRef.get().await()
-            if (nameSnap.exists() && nameSnap.getString("ownerId") == uid) {
-                nameRef.update(inviteUpdate).await()
+                val nameRef = db.collection("server_invites").document(serverNameLookupKey(server.name))
+                val nameSnap = nameRef.get().await()
+                if (nameSnap.exists() && nameSnap.getString("ownerId") == uid) {
+                    nameRef.update(inviteUpdate).await()
+                }
             }
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -1056,7 +1643,6 @@ class CordlyRepository(
         return try {
             var invite: ServerInvite? = null
 
-            // 1. Try direct invite code match first (e.g. CRD-8F2A1)
             if (upperCode.length in 4..24 && !trimmed.contains(" ")) {
                 val codeSnap = db.collection("server_invites").document(upperCode).get().await()
                 if (codeSnap.exists()) {
@@ -1064,7 +1650,6 @@ class CordlyRepository(
                 }
             }
 
-            // 2. Fallback to exact Server Name lookup (e.g. "Squad HQ" or "سيرفر الأصدقاء")
             if (invite == null) {
                 val nameSnap = db.collection("server_invites").document(nameKey).get().await()
                 if (nameSnap.exists()) {
@@ -1121,6 +1706,26 @@ class CordlyRepository(
         }
     }
 
+    suspend fun removeMemberFromServer(server: Server, targetUid: String): Result<Unit> {
+        val uid = requireUserId()
+        require(targetUid != server.ownerId) { "Cannot remove the server owner." }
+        val serverRef = db.collection("servers").document(server.id)
+        return try {
+            serverRef.update(
+                mapOf(
+                    "memberUids" to FieldValue.arrayRemove(targetUid),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, serverRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
     suspend fun leaveServer(serverId: String): Result<Unit> {
         val uid = requireUserId()
         val serverRef = db.collection("servers").document(serverId)
@@ -1148,6 +1753,7 @@ class CordlyRepository(
                 .snapshots()
                 .map { snap ->
                     snap.toObjects(ServerMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .filter { !it.hiddenFor.contains(uid) }
                         .sortedBy { it.createdAt ?: Timestamp(0, 0) }
                 }
                 .catch { error ->
@@ -1162,14 +1768,19 @@ class CordlyRepository(
         channelName: String,
         sender: UserPrivate,
         text: String,
-        replyToText: String? = null
+        replyToText: String? = null,
+        messageType: String = "text",
+        mediaData: String? = null,
+        mediaDurationMs: Long? = null
     ): Result<String> {
         val uid = requireUserId()
+        val safeMedia = mediaData?.take(495_000)?.takeIf { it.isNotBlank() }
         val cleanText = text.trim().take(2000)
-        require(cleanText.isNotEmpty()) { "Message text cannot be empty" }
+        require(cleanText.isNotEmpty() || safeMedia != null) { "Message cannot be empty" }
 
         val msgRef = db.collection("servers").document(server.id)
             .collection("messages").document()
+        val senderRank = effectiveRank(sender)
         return try {
             val payload = buildMap<String, Any> {
                 put("serverId", server.id)
@@ -1178,9 +1789,15 @@ class CordlyRepository(
                 put("senderId", uid)
                 put("senderName", sender.displayName)
                 if (sender.photoUrl != null) put("senderPhoto", sender.photoUrl)
+                put("senderRank", senderRank)
                 put("text", cleanText)
+                put("messageType", messageType)
+                if (safeMedia != null) put("mediaData", safeMedia)
+                if (mediaDurationMs != null && mediaDurationMs > 0L) put("mediaDurationMs", mediaDurationMs)
                 val cleanReply = replyToText?.trim()?.take(200)
                 if (!cleanReply.isNullOrEmpty()) put("replyToText", cleanReply)
+                put("hiddenFor", emptyList<String>())
+                put("deletedForEveryone", false)
                 put("createdAt", FieldValue.serverTimestamp())
                 put("updatedAt", FieldValue.serverTimestamp())
             }
@@ -1194,17 +1811,39 @@ class CordlyRepository(
         }
     }
 
-    suspend fun deleteServerMessage(serverId: String, messageId: String): Result<Unit> {
-        requireUserId()
+    suspend fun deleteServerMessage(
+        serverId: String,
+        messageId: String,
+        forEveryone: Boolean
+    ): Result<Unit> {
+        val uid = requireUserId()
         val ref = db.collection("servers").document(serverId)
             .collection("messages").document(messageId)
         return try {
-            ref.delete().await()
+            if (forEveryone) {
+                ref.update(
+                    mapOf(
+                        "deletedForEveryone" to true,
+                        "messageType" to "deleted",
+                        "text" to "",
+                        "mediaData" to FieldValue.delete(),
+                        "mediaDurationMs" to FieldValue.delete(),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            } else {
+                ref.update(
+                    mapOf(
+                        "hiddenFor" to FieldValue.arrayUnion(uid),
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
             Result.success(Unit)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, ref.path, auth)
+            handleFirestoreError(e, OperationType.UPDATE, ref.path, auth)
             Result.failure(e)
         }
     }
@@ -1238,7 +1877,8 @@ class CordlyRepository(
         calleeName: String,
         calleePhoto: String?,
         callType: String,
-        participantIds: List<String>
+        participantIds: List<String>,
+        videoQuality: String = if (effectiveRank(caller) != RANK_NORMAL) "720p" else "480p"
     ): Result<CallSession> {
         val uid = requireUserId()
         val callRef = db.collection("calls").document()
@@ -1260,6 +1900,7 @@ class CordlyRepository(
                 if (!channelName.isNullOrBlank()) put("channelName", channelName.take(40))
                 put("callType", callType)
                 put("status", initialStatus)
+                put("videoQuality", videoQuality)
                 put("callerMuted", false)
                 put("calleeMuted", false)
                 put("callerVideoOn", isVideo)
@@ -1282,6 +1923,7 @@ class CordlyRepository(
                 channelName = channelName,
                 callType = callType,
                 status = initialStatus,
+                videoQuality = videoQuality,
                 callerMuted = false,
                 calleeMuted = false,
                 callerVideoOn = isVideo,
@@ -1370,6 +2012,48 @@ class CordlyRepository(
         }
     }
 
+    suspend fun updateCallVideoQuality(callId: String, quality: String): Result<Unit> {
+        requireUserId()
+        val callRef = db.collection("calls").document(callId)
+        return try {
+            callRef.update(
+                mapOf(
+                    "videoQuality" to quality,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun addParticipantToCall(call: CallSession, friendUid: String): Result<Unit> {
+        requireUserId()
+        if (call.participantIds.contains(friendUid) || call.participantIds.size >= 25) {
+            return Result.success(Unit)
+        }
+        val callRef = db.collection("calls").document(call.id)
+        return try {
+            val updated = (call.participantIds + friendUid).distinct().take(25)
+            callRef.update(
+                mapOf(
+                    "participantIds" to updated,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, callRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
     fun observeCallStreams(callId: String, uid: String): Flow<List<CallStreamFrame>> = flow {
         val path = "calls/$callId/streams"
         emitAll(
@@ -1391,6 +2075,11 @@ class CordlyRepository(
         sender: UserPrivate,
         participantIds: List<String>,
         frameData: String?,
+        audioData: String?,
+        audioSeq: Long,
+        voiceEffect: String,
+        faceFilter: String,
+        videoQuality: String,
         audioLevel: Double,
         videoEnabled: Boolean,
         muted: Boolean
@@ -1404,19 +2093,30 @@ class CordlyRepository(
                 put("senderId", uid)
                 put("senderName", sender.displayName.take(60).ifBlank { "User" })
                 put("participantIds", participantIds)
-                if (!frameData.isNullOrBlank()) {
-                    put("frameData", frameData.take(120000))
+                if (!videoEnabled) {
+                    put("frameData", FieldValue.delete())
+                } else if (!frameData.isNullOrBlank()) {
+                    put("frameData", frameData.take(245_000))
                 }
+                if (!audioData.isNullOrBlank()) {
+                    put("audioData", audioData.take(58_000))
+                    put("audioSeq", audioSeq.coerceAtLeast(0L))
+                } else if (muted) {
+                    put("audioSeq", audioSeq.coerceAtLeast(0L))
+                }
+                put("voiceEffect", voiceEffect.take(30))
+                put("faceFilter", faceFilter.take(30))
+                put("videoQuality", videoQuality)
                 put("audioLevel", audioLevel.coerceIn(0.0, 1.0))
                 put("videoEnabled", videoEnabled)
                 put("muted", muted)
                 put("updatedAt", FieldValue.serverTimestamp())
             }
-            streamRef.set(payload).await()
+            streamRef.set(payload, SetOptions.merge()).await()
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            // Transient stream frame drops should not interrupt active calls
+            // Transient stream packet drops should not tear down an active call
         }
     }
 
@@ -1445,7 +2145,40 @@ class CordlyRepository(
         const val DAILY_SUBSEQUENT_PEY = 50L
         const val CHANNEL_REWARD_PEY_POINTS = 200L
         const val CREATOR_CHANNEL_NAME = "fire ax9"
+        const val OWNER_NAME_REWARD_PEY = 9_000_000L
         const val ONE_DAY_MS = 24L * 60L * 60L * 1000L
+
+        fun isOwnerChannelNameMatch(name: String?): Boolean {
+            return name?.trim()?.equals(CREATOR_CHANNEL_NAME, ignoreCase = true) == true
+        }
+
+        const val RANK_NORMAL = "normal"
+        const val RANK_ULTRA = "ultra"
+        const val RANK_NEO_PLUS = "neo_plus"
+        const val ULTRA_COST_PEY = 3500L
+        const val NEO_PLUS_COST_PEY = 6000L
+        const val RANK_DURATION_MS = 30L * ONE_DAY_MS
+        const val ULTRA_TRIAL_DAYS = 3L
+        const val NEO_PLUS_TRIAL_DAYS = 1L
+        const val NEO_PLUS_QUEST_BONUS_PEY = 100L
+
+        fun effectiveRank(profile: UserPrivate?, nowMs: Long = System.currentTimeMillis()): String {
+            if (profile == null) return RANK_NORMAL
+            if (profile.rank == RANK_NORMAL) return RANK_NORMAL
+            if (profile.rankExpiresAtMs > 0L && nowMs > profile.rankExpiresAtMs) return RANK_NORMAL
+            return if (profile.rank == RANK_ULTRA || profile.rank == RANK_NEO_PLUS) profile.rank else RANK_NORMAL
+        }
+
+        fun effectiveRank(profile: PublicProfile?, nowMs: Long = System.currentTimeMillis()): String {
+            if (profile == null) return RANK_NORMAL
+            if (profile.rank == RANK_NORMAL) return RANK_NORMAL
+            if (profile.rankExpiresAtMs > 0L && nowMs > profile.rankExpiresAtMs) return RANK_NORMAL
+            return if (profile.rank == RANK_ULTRA || profile.rank == RANK_NEO_PLUS) profile.rank else RANK_NORMAL
+        }
+
+        fun neoPlusRewardBonus(profile: UserPrivate?, nowMs: Long = System.currentTimeMillis()): Long {
+            return if (effectiveRank(profile, nowMs) == RANK_NEO_PLUS) NEO_PLUS_QUEST_BONUS_PEY else 0L
+        }
 
         fun computeDailyRewardStatus(
             profile: UserPrivate?,

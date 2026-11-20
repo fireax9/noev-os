@@ -449,4 +449,232 @@ test("Voice and video calls enforce participant isolation and sender-matched str
   await assertFails(
     charlieDb.collection("calls").doc(callId).collection("streams").doc(BOB_UID).get()
   );
+
+  // Alice expands call for multi-person (Neo Plus) & sets 4K quality + Bob sends audio packet
+  await assertSucceeds(
+    aliceDb.collection("calls").doc(callId).update({
+      participantIds: [ALICE_UID, BOB_UID, CHARLIE_UID],
+      videoQuality: "4K",
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    bobDb.collection("calls").doc(callId).collection("streams").doc(BOB_UID).update({
+      participantIds: [ALICE_UID, BOB_UID, CHARLIE_UID],
+      audioData: "AQIDBAUGBwg=",
+      audioSeq: 7,
+      voiceEffect: "deep",
+      faceFilter: "dog_ears",
+      videoQuality: "1080p",
+      updatedAt: serverTimestamp(),
+    })
+  );
 });
+
+test("DM Delete-for-Me (hiddenFor) vs Delete-for-Everyone and rich media payloads", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+  const convId = `${ALICE_UID}_${BOB_UID}`;
+
+  await assertSucceeds(
+    aliceDb.collection("conversations").doc(convId).set({
+      participantIds: [ALICE_UID, BOB_UID],
+      participantAId: ALICE_UID,
+      participantAName: "Alice",
+      participantBId: BOB_UID,
+      participantBName: "Bob",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("conversations").doc(convId).collection("messages").doc("msg_rich").set({
+      conversationId: convId,
+      participantIds: [ALICE_UID, BOB_UID],
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderRank: "ultra",
+      text: "Voice clip",
+      messageType: "audio",
+      mediaData: "UklGRiQAAABXQVZF",
+      mediaDurationMs: 2400,
+      hiddenFor: [],
+      deletedForEveryone: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Bob can Delete-for-Me (add only his own UID to hiddenFor)
+  await assertSucceeds(
+    bobDb.collection("conversations").doc(convId).collection("messages").doc("msg_rich").update({
+      hiddenFor: [BOB_UID],
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Bob CANNOT delete Alice's message for everyone
+  await assertFails(
+    bobDb.collection("conversations").doc(convId).collection("messages").doc("msg_rich").update({
+      deletedForEveryone: true,
+      text: "Message deleted",
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Alice CAN delete her own message for everyone
+  await assertSucceeds(
+    aliceDb.collection("conversations").doc(convId).collection("messages").doc("msg_rich").update({
+      deletedForEveryone: true,
+      messageType: "deleted",
+      text: "تم حذف هذه الرسالة",
+      mediaData: null,
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Charlie cannot hide a DM message he doesn't belong to
+  await assertFails(
+    charlieDb.collection("conversations").doc(convId).collection("messages").doc("msg_rich").update({
+      hiddenFor: [BOB_UID, CHARLIE_UID],
+      updatedAt: serverTimestamp(),
+    })
+  );
+});
+
+test("Ranks, Ultra directory query isolation, Neo Plus custom quests, and developer tickets", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+
+  // Alice is Neo Plus
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      email: "alice@gmail.com",
+      displayName: "Alice",
+      friendCode: "NEV-AL1C",
+      status: "online",
+      rank: "neo_plus",
+      rankExpiresAtMs: Date.now() + 86400000,
+      neoPlusTrialUsed: true,
+      profileThemeColorHex: "#FFD166",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("public_profiles").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      displayName: "Alice",
+      friendCode: "NEV-AL1C",
+      status: "online",
+      rank: "neo_plus",
+      rankExpiresAtMs: Date.now() + 86400000,
+      profileThemeColorHex: "#FFD166",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Bob is Normal rank
+  await assertSucceeds(
+    bobDb.collection("users").doc(BOB_UID).set({
+      userId: BOB_UID,
+      email: "bob@gmail.com",
+      displayName: "Bob",
+      friendCode: "NEV-B0B1",
+      status: "online",
+      rank: "normal",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    bobDb.collection("public_profiles").doc(BOB_UID).set({
+      userId: BOB_UID,
+      displayName: "Bob",
+      friendCode: "NEV-B0B1",
+      status: "online",
+      rank: "normal",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Ultra directory query succeeds for ultra/neo_plus filter, unfiltered list fails
+  await assertSucceeds(
+    bobDb.collection("public_profiles").where("rank", "in", ["ultra", "neo_plus"]).get()
+  );
+  await assertFails(
+    bobDb.collection("public_profiles").get()
+  );
+
+  // Alice (Neo Plus) can create custom quests and developer messages
+  await assertSucceeds(
+    aliceDb.collection("custom_quests").doc("q_1").set({
+      creatorId: ALICE_UID,
+      creatorName: "Alice",
+      creatorRank: "neo_plus",
+      title: "Add 5 friends for 300 each",
+      questType: "add_friends",
+      targetCount: 5,
+      rewardPerStep: 300,
+      totalReward: 1500,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    aliceDb.collection("dev_messages").doc("t_1").set({
+      senderId: ALICE_UID,
+      senderName: "Alice",
+      senderRank: "neo_plus",
+      subject: "Feature idea",
+      message: "Great app!",
+      status: "sent",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Bob (Normal) CANNOT create custom quests or dev messages
+  await assertFails(
+    bobDb.collection("custom_quests").doc("q_2").set({
+      creatorId: BOB_UID,
+      creatorName: "Bob",
+      creatorRank: "neo_plus",
+      title: "Fake quest",
+      questType: "add_friends",
+      targetCount: 5,
+      rewardPerStep: 300,
+      totalReward: 1500,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertFails(
+    bobDb.collection("dev_messages").doc("t_2").set({
+      senderId: BOB_UID,
+      senderName: "Bob",
+      senderRank: "neo_plus",
+      subject: "Spoof",
+      message: "Nope",
+      status: "sent",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Bob CAN read custom quests
+  await assertSucceeds(bobDb.collection("custom_quests").get());
+  // Bob CANNOT read Alice's dev tickets
+  await assertFails(bobDb.collection("dev_messages").doc("t_1").get());
+});
+

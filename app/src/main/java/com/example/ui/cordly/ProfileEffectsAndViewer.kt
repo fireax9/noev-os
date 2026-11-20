@@ -8,6 +8,7 @@ import android.view.Surface
 import android.view.TextureView
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -272,9 +274,21 @@ fun DiscordProfileSheetDialog(
     val customStatus = targetProfile?.customStatus
     val friendCode = targetProfile?.friendCode
     val equippedFrame = targetProfile?.equippedFrame ?: "none"
+    val equippedCardFrame = targetProfile?.equippedCardFrame ?: "none"
     val equippedEffect = targetProfile?.equippedProfileEffect ?: "none"
+    val memberRank = remember(targetProfile?.rank, targetProfile?.rankExpiresAtMs) {
+        com.example.data.repository.CordlyRepository.effectiveRank(targetProfile)
+    }
+    val customThemeColor = remember(targetProfile?.profileThemeColorHex, memberRank) {
+        if (memberRank != com.example.data.repository.CordlyRepository.RANK_NORMAL) {
+            targetProfile?.profileThemeColorHex?.takeIf { it.isNotBlank() }?.let { parseHexColor(it) }
+        } else {
+            null
+        }
+    }
     val effectItem = remember(equippedEffect) { PeyShopCatalog.findEffectById(equippedEffect) }
     val frameItem = remember(equippedFrame) { PeyShopCatalog.findById(equippedFrame) }
+    val cardFrameItem = remember(equippedCardFrame) { PeyShopCatalog.findCardFrameById(equippedCardFrame) }
 
     val videoSource = remember(uid, equippedEffect, targetProfile?.profileVideoData) {
         VideoEffectHelper.resolveVideoSource(
@@ -283,6 +297,17 @@ fun DiscordProfileSheetDialog(
             equippedEffect = equippedEffect,
             profileVideoData = targetProfile?.profileVideoData
         )
+    }
+    val avatarVideoSource = remember(uid, memberRank, targetProfile?.avatarVideoData) {
+        if (memberRank == com.example.data.repository.CordlyRepository.RANK_NEO_PLUS) {
+            VideoEffectHelper.resolveAvatarVideoSource(
+                context = context,
+                uid = uid,
+                avatarVideoData = targetProfile?.avatarVideoData
+            )
+        } else {
+            null
+        }
     }
 
     val progressState = remember(videoSource) { mutableFloatStateOf(0f) }
@@ -294,14 +319,27 @@ fun DiscordProfileSheetDialog(
             decorFitsSystemWindows = false
         )
     ) {
+        val hasCardFrame = cardFrameItem.id != "none"
+        val borderColors = when {
+            hasCardFrame -> cardFrameItem.borderColors
+            customThemeColor != null -> listOf(customThemeColor, customThemeColor.copy(alpha = 0.65f), CordlyCyan)
+            videoSource != null -> effectItem.accentColors
+            else -> listOf(CordlyDivider, CordlyBlurple)
+        }
+        val activeCardAccent = if (hasCardFrame) cardFrameItem.accentColor else customThemeColor
         Surface(
-            color = CordlySurfaceDark,
+            color = activeCardAccent?.copy(alpha = 0.16f)?.let { tint ->
+                Color(
+                    red = (CordlySurfaceDark.red * 0.82f + tint.red * 0.18f).coerceIn(0f, 1f),
+                    green = (CordlySurfaceDark.green * 0.82f + tint.green * 0.18f).coerceIn(0f, 1f),
+                    blue = (CordlySurfaceDark.blue * 0.82f + tint.blue * 0.18f).coerceIn(0f, 1f),
+                    alpha = 1f
+                )
+            } ?: CordlySurfaceDark,
             shape = RoundedCornerShape(26.dp),
             border = BorderStroke(
-                width = 1.5.dp,
-                brush = Brush.linearGradient(
-                    if (videoSource != null) effectItem.accentColors else listOf(CordlyDivider, CordlyBlurple)
-                )
+                width = if (hasCardFrame) 2.8.dp else if (customThemeColor != null) 2.dp else 1.5.dp,
+                brush = Brush.linearGradient(borderColors)
             ),
             modifier = Modifier
                 .systemBarsPadding()
@@ -325,9 +363,29 @@ fun DiscordProfileSheetDialog(
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color.Black.copy(alpha = 0.22f),
+                                        (activeCardAccent ?: Color.Black).copy(alpha = 0.24f),
                                         Color(0xFF0A0D18).copy(alpha = 0.72f),
                                         Color(0xFF0A0D18).copy(alpha = 0.90f)
+                                    )
+                                )
+                            )
+                    )
+                } else if (cardFrameItem.artworkResId != null) {
+                    Image(
+                        painter = painterResource(cardFrameItem.artworkResId),
+                        contentDescription = cardFrameItem.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF070910).copy(alpha = 0.28f),
+                                        Color(0xFF070910).copy(alpha = 0.78f),
+                                        Color(0xFF070910).copy(alpha = 0.94f)
                                     )
                                 )
                             )
@@ -341,10 +399,14 @@ fun DiscordProfileSheetDialog(
                             .fillMaxWidth()
                             .height(150.dp)
                             .then(
-                                if (videoSource == null) {
+                                if (videoSource == null && cardFrameItem.artworkResId == null) {
                                     Modifier.background(
                                         Brush.linearGradient(
-                                            listOf(CordlyBlurple, Color(0xFF7C3AED), CordlyCyan)
+                                            if (activeCardAccent != null) {
+                                                listOf(activeCardAccent, activeCardAccent.copy(alpha = 0.7f), CordlyBlurple)
+                                            } else {
+                                                listOf(CordlyBlurple, Color(0xFF7C3AED), CordlyCyan)
+                                            }
                                         )
                                     )
                                 } else {
@@ -457,38 +519,85 @@ fun DiscordProfileSheetDialog(
                                     frameId = equippedFrame,
                                     size = 94.dp
                                 )
+                                if (avatarVideoSource != null) {
+                                    ProfileVideoBackgroundPlayer(
+                                        source = avatarVideoSource,
+                                        isUnlimitedDuration = true,
+                                        modifier = Modifier
+                                            .size(80.dp)
+                                            .align(Alignment.Center)
+                                            .clip(CircleShape)
+                                    )
+                                }
                             }
 
-                            if (frameItem.id != "none") {
-                                Surface(
-                                    color = CordlyElevatedSurface.copy(alpha = 0.85f),
-                                    shape = RoundedCornerShape(12.dp),
-                                    border = BorderStroke(1.dp, CordlyAmber.copy(alpha = 0.5f)),
-                                    modifier = Modifier.padding(bottom = 12.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(bottom = 10.dp)
+                            ) {
+                                if (cardFrameItem.id != "none") {
+                                    Surface(
+                                        color = CordlyElevatedSurface.copy(alpha = 0.90f),
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, cardFrameItem.accentColor.copy(alpha = 0.75f))
                                     ) {
-                                        Icon(
-                                            Icons.Rounded.AutoAwesome,
-                                            contentDescription = null,
-                                            tint = CordlyAmber,
-                                            modifier = Modifier.size(14.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(5.dp))
-                                        Text(
-                                            text = frameItem.title,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = CordlyAmber
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.AutoAwesome,
+                                                contentDescription = null,
+                                                tint = cardFrameItem.accentColor,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text(
+                                                text = cardFrameItem.title,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = cardFrameItem.accentColor,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                                if (frameItem.id != "none") {
+                                    Surface(
+                                        color = CordlyElevatedSurface.copy(alpha = 0.85f),
+                                        shape = RoundedCornerShape(12.dp),
+                                        border = BorderStroke(1.dp, CordlyAmber.copy(alpha = 0.5f))
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.AutoAwesome,
+                                                contentDescription = null,
+                                                tint = CordlyAmber,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(5.dp))
+                                            Text(
+                                                text = frameItem.title,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = CordlyAmber,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
 
                         Column(modifier = Modifier.offset(y = (-24).dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                                 Text(
                                     text = displayName,
                                     style = MaterialTheme.typography.headlineMedium,
@@ -496,8 +605,9 @@ fun DiscordProfileSheetDialog(
                                     fontWeight = FontWeight.Bold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
+                                RankBadgePill(rank = memberRank)
                                 if (isLoading) {
                                     CircularProgressIndicator(
                                         color = CordlyCyan,
@@ -511,7 +621,7 @@ fun DiscordProfileSheetDialog(
                                 Text(
                                     text = "$friendCode • ${statusLabel(status, strings)}",
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = CordlyCyan
+                                    color = customThemeColor ?: CordlyCyan
                                 )
                             } else {
                                 Text(
@@ -524,9 +634,14 @@ fun DiscordProfileSheetDialog(
                             Spacer(modifier = Modifier.height(12.dp))
 
                             Surface(
-                                color = CordlyCardSurface.copy(alpha = 0.84f),
+                                color = (customThemeColor ?: CordlyCardSurface).copy(
+                                    alpha = if (customThemeColor != null) 0.22f else 0.84f
+                                ),
                                 shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, CordlyDivider.copy(alpha = 0.8f)),
+                                border = BorderStroke(
+                                    1.dp,
+                                    (customThemeColor ?: CordlyDivider).copy(alpha = 0.75f)
+                                ),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(
@@ -572,7 +687,9 @@ fun DiscordProfileSheetDialog(
                                         onDismiss()
                                         onMessageUser()
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = CordlyBlurple),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = customThemeColor ?: CordlyBlurple
+                                    ),
                                     shape = RoundedCornerShape(14.dp),
                                     modifier = Modifier
                                         .fillMaxWidth()

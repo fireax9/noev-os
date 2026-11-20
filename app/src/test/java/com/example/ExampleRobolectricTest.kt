@@ -52,4 +52,19 @@ class ExampleRobolectricTest {
     val dbId = context.getString(R.string.firestore_database_id)
     assertEquals("ai-studio-android-cordly-00175bc8-627e-456d-b1c6-c796f1aff3b1", dbId)
   }
+
+  @Test
+  fun `neo plus app launcher logo and ui layout prefs persist`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    assertEquals(com.example.ui.cordly.AppLogoVariant.DEFAULT, AppAppearanceStore.loadLogoVariant(context))
+    AppAppearanceStore.applyAppLogoVariant(context, com.example.ui.cordly.AppLogoVariant.GOLD)
+    assertEquals(com.example.ui.cordly.AppLogoVariant.GOLD, AppAppearanceStore.loadLogoVariant(context))
+
+    val customLayout = com.example.ui.cordly.AppUiLayoutPrefs(
+      railOnRight = true,
+      compactMessageCards = true
+    )
+    AppAppearanceStore.saveLayoutPrefs(context, customLayout)
+    assertEquals(customLayout, AppAppearanceStore.loadLayoutPrefs(context))
+  }
 }

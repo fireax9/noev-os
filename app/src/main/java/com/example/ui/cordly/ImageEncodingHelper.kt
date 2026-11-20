@@ -12,6 +12,9 @@ import android.util.Base64
 import android.util.LruCache
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -25,6 +28,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -311,6 +315,30 @@ fun PresetBannerCanvas(
     preset: ProfileBannerPreset,
     modifier: Modifier = Modifier
 ) {
+    val artRes = preset.artworkResId
+    if (artRes != null) {
+        Box(modifier = modifier) {
+            Image(
+                painter = painterResource(artRes),
+                contentDescription = preset.titleEn,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                (preset.colors.firstOrNull() ?: Color.Black).copy(alpha = 0.16f),
+                                Color.Black.copy(alpha = 0.42f)
+                            )
+                        )
+                    )
+            )
+        }
+        return
+    }
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height

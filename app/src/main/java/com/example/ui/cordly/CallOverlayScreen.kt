@@ -1,25 +1,14 @@
 package com.example.ui.cordly
 
 import android.Manifest
-import android.annotation.SuppressLint
-import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Matrix
-import android.graphics.Rect
-import android.graphics.YuvImage
-import android.media.AudioFormat
-import android.media.AudioManager
-import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -30,10 +19,12 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,22 +38,32 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Cameraswitch
+import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MicOff
+import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.RecordVoiceOver
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material.icons.rounded.VideocamOff
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -70,6 +71,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -79,6 +81,8 @@ import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +90,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -99,6 +105,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.model.CallSession
 import com.example.data.model.CallStreamFrame
+import com.example.data.repository.CordlyRepository
 import com.example.ui.theme.CordlyAmber
 import com.example.ui.theme.CordlyBlurple
 import com.example.ui.theme.CordlyCardSurface
@@ -110,13 +117,15 @@ import com.example.ui.theme.CordlyEmerald
 import com.example.ui.theme.CordlySurfaceDark
 import com.example.ui.theme.CordlyTextPrimary
 import com.example.ui.theme.CordlyTextSecondary
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.withContext
-import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
-import kotlin.math.abs
+
+data class InviteableFriend(
+    val uid: String,
+    val name: String,
+    val photoUrl: String?
+)
 
 @Composable
 fun IncomingCallBanner(
@@ -133,6 +142,11 @@ fun IncomingCallBanner(
         animationSpec = infiniteRepeatable(tween(650), RepeatMode.Reverse),
         label = "ringAlpha"
     )
+
+    DisposableEffect(call.id) {
+        SoundEffectsManager.startRingingLoop(incoming = true)
+        onDispose { SoundEffectsManager.stopRingingLoop() }
+    }
 
     Surface(
         color = CordlySurfaceDark,
@@ -178,7 +192,11 @@ fun IncomingCallBanner(
                 )
             }
             IconButton(
-                onClick = onDecline,
+                onClick = {
+                    SoundEffectsManager.stopRingingLoop()
+                    SoundEffectsManager.play(AppSoundEffect.CALL_END)
+                    onDecline()
+                },
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
@@ -189,7 +207,11 @@ fun IncomingCallBanner(
             }
             Spacer(modifier = Modifier.width(8.dp))
             IconButton(
-                onClick = if (call.callType == "video") onAnswerVideo else onAnswerVoice,
+                onClick = {
+                    SoundEffectsManager.stopRingingLoop()
+                    SoundEffectsManager.play(AppSoundEffect.CALL_CONNECT)
+                    if (call.callType == "video") onAnswerVideo() else onAnswerVoice()
+                },
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
@@ -210,23 +232,62 @@ fun IncomingCallBanner(
 fun ActiveCallOverlayDialog(
     call: CallSession,
     currentUserId: String,
+    currentUserRank: String,
     streams: List<CallStreamFrame>,
+    inviteableFriends: List<InviteableFriend> = emptyList(),
     onToggleMute: (Boolean) -> Unit,
     onToggleVideo: (Boolean) -> Unit,
-    onPublishStreamSample: (frameData: String?, audioLevel: Double, videoEnabled: Boolean, muted: Boolean) -> Unit,
+    onUpdateVideoQuality: (String) -> Unit,
+    onAddParticipant: (friendUid: String, friendName: String) -> Unit,
+    onPublishStreamSample: (
+        frameData: String?,
+        audioData: String?,
+        audioSeq: Long,
+        voiceEffect: String,
+        faceFilter: String,
+        videoQuality: String,
+        audioLevel: Double,
+        videoEnabled: Boolean,
+        muted: Boolean
+    ) -> Unit,
+    onStatusToast: (String) -> Unit = {},
     onEndCall: () -> Unit,
     onMinimize: () -> Unit
 ) {
     val strings = LocalAppStrings.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val isUltraOrPlus = currentUserRank == CordlyRepository.RANK_ULTRA || currentUserRank == CordlyRepository.RANK_NEO_PLUS
+    val isNeoPlus = currentUserRank == CordlyRepository.RANK_NEO_PLUS
 
     var isMuted by remember(call.id) { mutableStateOf(false) }
-    var isSpeakerOn by remember(call.id) { mutableStateOf(call.callType == "video") }
+    var isSpeakerOn by remember(call.id) { mutableStateOf(true) }
     var isVideoEnabled by remember(call.id) { mutableStateOf(call.callType == "video") }
     var useFrontCamera by remember(call.id) { mutableStateOf(true) }
     var elapsedSeconds by remember(call.id) { mutableLongStateOf(0L) }
     var localMicAmplitude by remember(call.id) { mutableDoubleStateOf(0.0) }
     var latestCapturedFrame by remember(call.id) { mutableStateOf<String?>(null) }
+
+    var selectedQuality by remember(call.id) { mutableStateOf(VideoQualityPreset.fromId(call.videoQuality)) }
+    val latestOnPublishSample by rememberUpdatedState(onPublishStreamSample)
+    val latestOnStatusToast by rememberUpdatedState(onStatusToast)
+
+    // Shared global Video Quality sync: whenever ANY peer changes quality, update for everyone
+    LaunchedEffect(call.videoQuality) {
+        val synced = VideoQualityPreset.fromId(call.videoQuality)
+        if (synced != selectedQuality) {
+            selectedQuality = synced
+            latestOnStatusToast("${strings.videoQualityLabel}: ${synced.label}")
+        }
+    }
+    var selectedFaceFilter by remember(call.id) { mutableStateOf(CallFaceFilter.NONE) }
+    var selectedVoiceEffect by remember(call.id) { mutableStateOf(VoiceEffectType.NORMAL) }
+    var isRecordingCall by remember(call.id) { mutableStateOf(false) }
+    var showQualityBar by remember(call.id) { mutableStateOf(false) }
+    var showFilterBar by remember(call.id) { mutableStateOf(false) }
+    var showVoiceFxBar by remember(call.id) { mutableStateOf(false) }
+    var showAddFriendDialog by remember(call.id) { mutableStateOf(false) }
 
     var hasAudioPermission by remember {
         mutableStateOf(
@@ -256,25 +317,30 @@ fun ActiveCallOverlayDialog(
         }
     }
 
-    // Configure Android AudioManager speakerphone & voice communication mode during active call
+    val audioEngine = remember(call.id) { CallAudioEngine(context.applicationContext) }
+
+    // Configure audio routing & start non-blocking AudioTrack playback + release on dispose
     DisposableEffect(call.id, isSpeakerOn) {
-        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        val prevMode = audioManager?.mode ?: AudioManager.MODE_NORMAL
-        @Suppress("DEPRECATION")
-        val prevSpeaker = audioManager?.isSpeakerphoneOn ?: false
-        try {
-            audioManager?.mode = AudioManager.MODE_IN_COMMUNICATION
-            @Suppress("DEPRECATION")
-            audioManager?.isSpeakerphoneOn = isSpeakerOn
-        } catch (_: Exception) {
-        }
+        val prev = CallAudioEngine.configureAudioRouting(context, isSpeakerOn)
+        audioEngine.startPlaybackTrack(scope)
         onDispose {
-            try {
-                audioManager?.mode = prevMode
-                @Suppress("DEPRECATION")
-                audioManager?.isSpeakerphoneOn = prevSpeaker
-            } catch (_: Exception) {
-            }
+            CallAudioEngine.restoreAudioRouting(context, prev)
+        }
+    }
+    DisposableEffect(call.id) {
+        onDispose {
+            SoundEffectsManager.stopRingingLoop()
+            audioEngine.release()
+        }
+    }
+
+    // Ringback sound while ringing; connect chime once active
+    LaunchedEffect(call.status) {
+        if (call.status == "ringing" && call.callerId == currentUserId) {
+            SoundEffectsManager.startRingingLoop(incoming = false)
+        } else if (call.status == "active") {
+            SoundEffectsManager.stopRingingLoop()
+            SoundEffectsManager.play(AppSoundEffect.CALL_CONNECT)
         }
     }
 
@@ -288,39 +354,70 @@ fun ActiveCallOverlayDialog(
         }
     }
 
-    // Real AudioRecord microphone amplitude sampler when permitted and unmuted
-    LaunchedEffect(call.id, hasAudioPermission, isMuted) {
-        if (!hasAudioPermission || isMuted) {
-            localMicAmplitude = 0.0
-            return@LaunchedEffect
-        }
-        withContext(Dispatchers.IO) {
-            sampleMicAmplitude(
-                shouldContinue = { isActive && !isMuted },
-                onAmplitude = { amp -> localMicAmplitude = amp }
-            )
+    // Capture real mic PCM -> Gain Boost -> Voice Changer DSP -> µ-law Base64 -> Publish to peers
+    LaunchedEffect(call.id, hasAudioPermission) {
+        if (!hasAudioPermission) return@LaunchedEffect
+        audioEngine.startCaptureLoop(
+            scope = scope,
+            isMutedProvider = { isMuted },
+            voiceEffectProvider = { selectedVoiceEffect },
+            onPacketReady = { audioB64, amp, seq ->
+                localMicAmplitude = amp
+                val frame = if (isVideoEnabled && hasCameraPermission) latestCapturedFrame else null
+                latestOnPublishSample(
+                    frame,
+                    audioB64,
+                    seq,
+                    selectedVoiceEffect.id,
+                    selectedFaceFilter.id,
+                    selectedQuality.id,
+                    amp,
+                    isVideoEnabled && hasCameraPermission,
+                    isMuted
+                )
+            }
+        )
+    }
+
+    // Non-blocking enqueue of every new remote audio packet for background AudioTrack playback
+    val remoteStreams = streams.filter { it.senderId != currentUserId }
+    LaunchedEffect(remoteStreams) {
+        remoteStreams.forEach { frame ->
+            if (!frame.muted) {
+                audioEngine.enqueueRemoteAudioPacket(frame.senderId, frame.audioData, frame.audioSeq)
+            }
         }
     }
 
-    // Periodic stream presence & camera frame sync to Firestore call participants
-    LaunchedEffect(call.id, isMuted, isVideoEnabled) {
+    // Video/presence keep-alive loop (runs whenever mic is muted, permission missing, or video frame changes)
+    LaunchedEffect(call.id, hasAudioPermission) {
         while (isActive) {
-            val frame = if (isVideoEnabled && hasCameraPermission) latestCapturedFrame else null
-            onPublishStreamSample(frame, localMicAmplitude, isVideoEnabled && hasCameraPermission, isMuted)
-            delay(1200L)
+            if (!hasAudioPermission || isMuted) {
+                val frame = if (isVideoEnabled && hasCameraPermission) latestCapturedFrame else null
+                latestOnPublishSample(
+                    frame,
+                    null,
+                    0L,
+                    selectedVoiceEffect.id,
+                    selectedFaceFilter.id,
+                    selectedQuality.id,
+                    localMicAmplitude,
+                    isVideoEnabled && hasCameraPermission,
+                    isMuted
+                )
+            }
+            delay(900L)
         }
     }
 
     val isCaller = call.callerId == currentUserId
-    val peerName = if (call.targetType == "server") {
-        call.calleeName
-    } else if (isCaller) {
-        call.calleeName
-    } else {
-        call.callerName
+    val peerName = when {
+        call.participantIds.size > 2 -> "${call.calleeName} (${call.participantIds.size})"
+        call.targetType == "server" -> call.calleeName
+        isCaller -> call.calleeName
+        else -> call.callerName
     }
     val peerPhoto = if (isCaller) call.calleePhoto else call.callerPhoto
-    val remoteStreams = streams.filter { it.senderId != currentUserId }
 
     Dialog(
         onDismissRequest = onMinimize,
@@ -344,10 +441,10 @@ fun ActiveCallOverlayDialog(
                             listOf(Color(0xFF000000), Color(0xFF07070B), Color(0xFF000000))
                         )
                     )
-                    .padding(16.dp),
+                    .padding(14.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Top Call Header
+                // Top Call Header + Quality / Multi-call / Close actions
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -371,29 +468,52 @@ fun ActiveCallOverlayDialog(
                         Text(
                             text = when {
                                 call.status == "ringing" -> strings.callingStatus
-                                call.targetType == "server" -> "${strings.groupVoiceCall} • $durationText"
-                                else -> "${strings.connectedCallStatus} • $durationText"
+                                call.targetType == "server" -> "${strings.groupVoiceCall} • $durationText • ${selectedQuality.label}"
+                                else -> "${strings.connectedCallStatus} • $durationText • ${selectedQuality.label}"
                             },
                             style = MaterialTheme.typography.labelMedium,
                             color = if (call.status == "active") CordlyEmerald else CordlyAmber
                         )
                     }
 
-                    Surface(
-                        color = CordlyCardSurface,
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, CordlyDivider),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable(onClick = onMinimize)
-                            .minimumInteractiveComponentSize()
-                    ) {
-                        Text(
-                            text = strings.closeButton,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = CordlyTextSecondary,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (isNeoPlus && inviteableFriends.isNotEmpty()) {
+                            Surface(
+                                color = Color(0xFFFFD166).copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, Color(0xFFFFD166)),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { showAddFriendDialog = true }
+                                    .testTag("call_add_participant_button")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(Icons.Rounded.PersonAdd, contentDescription = strings.addToCall, tint = Color(0xFFFFD166), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("+Call", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFD166), fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        Surface(
+                            color = CordlyCardSurface,
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, CordlyDivider),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(onClick = onMinimize)
+                                .minimumInteractiveComponentSize()
+                        ) {
+                            Text(
+                                text = strings.closeButton,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = CordlyTextSecondary,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
                     }
                 }
 
@@ -405,7 +525,7 @@ fun ActiveCallOverlayDialog(
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 8.dp)
+                            .padding(vertical = 6.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -438,21 +558,21 @@ fun ActiveCallOverlayDialog(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     if (isVideoEnabled && hasCameraPermission) {
-                        // Video Split Stage: Remote Stream(s) + Self CameraX Preview
                         Column(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
+                            // Remote video stage — strictly uses ContentScale.Fit so peer image NEVER stretches!
                             Surface(
-                                color = CordlyCardSurface,
+                                color = Color.Black,
                                 shape = RoundedCornerShape(22.dp),
                                 border = BorderStroke(
                                     width = 1.5.dp,
-                                    color = if ((remoteStreams.firstOrNull()?.audioLevel ?: 0.0) > 0.18) CordlyEmerald else CordlyDivider
+                                    color = if ((remoteStreams.firstOrNull()?.audioLevel ?: 0.0) > 0.16) CordlyEmerald else CordlyDivider
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
@@ -467,7 +587,7 @@ fun ActiveCallOverlayDialog(
                                         Image(
                                             bitmap = remoteBitmap.asImageBitmap(),
                                             contentDescription = peerName,
-                                            contentScale = ContentScale.Crop,
+                                            contentScale = ContentScale.Fit,
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     } else {
@@ -476,7 +596,7 @@ fun ActiveCallOverlayDialog(
                                                 displayName = firstRemote?.senderName ?: peerName,
                                                 photoUrl = peerPhoto,
                                                 status = "online",
-                                                size = 96.dp
+                                                size = 92.dp
                                             )
                                             Spacer(modifier = Modifier.height(10.dp))
                                             Text(
@@ -493,9 +613,27 @@ fun ActiveCallOverlayDialog(
                                             }
                                         }
                                     }
-                                    // Flip camera quick icon
+
+                                    // Peer quality pill + Flip Camera button
+                                    if (firstRemote != null) {
+                                        Surface(
+                                            color = Color.Black.copy(alpha = 0.65f),
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .padding(10.dp)
+                                        ) {
+                                            Text(
+                                                text = "${firstRemote.videoQuality} • ${CallFaceFilter.fromId(firstRemote.faceFilter).emoji}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = CordlyCyan,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+
                                     Surface(
-                                        color = Color.Black.copy(alpha = 0.65f),
+                                        color = Color.Black.copy(alpha = 0.68f),
                                         shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
@@ -515,27 +653,28 @@ fun ActiveCallOverlayDialog(
                                 }
                             }
 
-                            // Self live CameraX preview
+                            // Self CameraX live preview with FIT_CENTER (no stretching!) + Snapchat Face Filter overlay
                             Surface(
-                                color = CordlyCardSurface,
+                                color = Color.Black,
                                 shape = RoundedCornerShape(20.dp),
                                 border = BorderStroke(
                                     width = 1.5.dp,
-                                    color = if (localMicAmplitude > 0.16 && !isMuted) CordlyEmerald else CordlyBlurple
+                                    color = if (localMicAmplitude > 0.14 && !isMuted) CordlyEmerald else CordlyBlurple
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(185.dp)
+                                    .height(175.dp)
                             ) {
                                 CameraXLivePreview(
                                     useFrontCamera = useFrontCamera,
+                                    qualityPreset = selectedQuality,
+                                    faceFilter = selectedFaceFilter,
                                     onFrameEncoded = { latestCapturedFrame = it },
                                     modifier = Modifier.fillMaxSize()
                                 )
                             }
                         }
                     } else {
-                        // Voice Call Stage: Participant Cards with live mic amplitude rings
                         val displayParticipants = if (remoteStreams.isNotEmpty()) {
                             remoteStreams
                         } else {
@@ -561,7 +700,8 @@ fun ActiveCallOverlayDialog(
                                     name = "You",
                                     photoUrl = if (isCaller) call.callerPhoto else call.calleePhoto,
                                     audioLevel = if (isMuted) 0.0 else localMicAmplitude,
-                                    muted = isMuted
+                                    muted = isMuted,
+                                    badge = if (selectedVoiceEffect != VoiceEffectType.NORMAL) selectedVoiceEffect.titleEn else null
                                 )
                             }
                             items(displayParticipants, key = { it.senderId }) { participant ->
@@ -569,79 +709,337 @@ fun ActiveCallOverlayDialog(
                                     name = participant.senderName,
                                     photoUrl = if (participant.senderId == call.callerId) call.callerPhoto else peerPhoto,
                                     audioLevel = if (participant.muted) 0.0 else participant.audioLevel,
-                                    muted = participant.muted
+                                    muted = participant.muted,
+                                    badge = participant.voiceEffect.takeIf { it != "normal" }?.let { VoiceEffectType.fromId(it).titleEn }
                                 )
                             }
                         }
                     }
                 }
 
-                // Bottom Call Controls Bar
-                Surface(
-                    color = CordlySurfaceDark,
-                    shape = RoundedCornerShape(24.dp),
-                    border = BorderStroke(1.dp, CordlyDivider),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                // Expandable tool trays: Video Quality (144p..4K), Snapchat Filters, Voice Changer
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AnimatedVisibility(visible = showQualityBar) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(bottom = 4.dp)
+                        ) {
+                            VideoQualityPreset.entries.forEach { preset ->
+                                val selected = preset == selectedQuality
+                                Surface(
+                                    color = if (selected) CordlyBlurple else CordlyCardSurface,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (preset.isHdTier) CordlyCyan.copy(alpha = 0.7f) else CordlyDivider
+                                    ),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            selectedQuality = preset
+                                            onUpdateVideoQuality(preset.id)
+                                            onStatusToast("${strings.videoQualityLabel}: ${preset.label}")
+                                        }
+                                        .testTag("quality_chip_${preset.id}")
+                                ) {
+                                    Text(
+                                        text = preset.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (selected) Color.White else CordlyTextPrimary,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = showFilterBar) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(bottom = 4.dp)
+                        ) {
+                            CallFaceFilter.entries.forEach { filter ->
+                                val selected = filter == selectedFaceFilter
+                                Surface(
+                                    color = if (selected) Color(0xFFEC4899) else CordlyCardSurface,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, if (selected) Color(0xFFF9A8D4) else CordlyDivider),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { selectedFaceFilter = filter }
+                                        .testTag("filter_chip_${filter.id}")
+                                ) {
+                                    Text(
+                                        text = "${filter.emoji} ${filter.titleEn}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    AnimatedVisibility(visible = showVoiceFxBar) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(bottom = 4.dp)
+                        ) {
+                            VoiceEffectType.entries.forEach { fx ->
+                                val locked = fx != VoiceEffectType.NORMAL && !isUltraOrPlus
+                                val selected = fx == selectedVoiceEffect
+                                Surface(
+                                    color = if (selected) CordlyEmerald else CordlyCardSurface,
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.dp, if (locked) CordlyAmber else CordlyDivider),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            if (locked) {
+                                                onStatusToast(strings.ultraFeatureLockedNotice)
+                                            } else {
+                                                selectedVoiceEffect = fx
+                                            }
+                                        }
+                                        .testTag("voice_fx_${fx.id}")
+                                ) {
+                                    Text(
+                                        text = if (locked) "🔒 ${fx.titleEn}" else fx.titleEn,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (locked) CordlyAmber else Color.White,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Feature toggle strip (Quality / Snapchat Filters / Voice Changer / Record)
                     Row(
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 12.dp, horizontal = 8.dp)
+                            .horizontalScroll(rememberScrollState())
                     ) {
-                        CallControlPill(
-                            icon = if (isMuted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
-                            label = if (isMuted) strings.unmuteMic else strings.muteMic,
-                            active = !isMuted,
-                            activeColor = CordlyElevatedSurface,
-                            inactiveColor = CordlyCrimson,
-                            testTag = "call_mute_button",
+                        MiniCallFeatureChip(
+                            icon = Icons.Rounded.HighQuality,
+                            label = selectedQuality.id,
+                            active = showQualityBar,
+                            accent = CordlyCyan,
+                            testTag = "call_quality_toggle",
                             onClick = {
-                                isMuted = !isMuted
-                                onToggleMute(isMuted)
+                                showQualityBar = !showQualityBar
+                                showFilterBar = false
+                                showVoiceFxBar = false
                             }
                         )
-
-                        CallControlPill(
-                            icon = if (isVideoEnabled) Icons.Rounded.Videocam else Icons.Rounded.VideocamOff,
-                            label = if (isVideoEnabled) strings.cameraOff else strings.cameraOn,
-                            active = isVideoEnabled,
-                            activeColor = CordlyBlurple,
-                            inactiveColor = CordlyCardSurface,
-                            testTag = "call_video_button",
+                        MiniCallFeatureChip(
+                            icon = Icons.Rounded.AutoAwesome,
+                            label = strings.faceFiltersLabel,
+                            active = showFilterBar || selectedFaceFilter != CallFaceFilter.NONE,
+                            accent = Color(0xFFEC4899),
+                            testTag = "call_filters_toggle",
                             onClick = {
-                                val next = !isVideoEnabled
-                                isVideoEnabled = next
-                                if (next && !hasCameraPermission) {
-                                    permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+                                showFilterBar = !showFilterBar
+                                showQualityBar = false
+                                showVoiceFxBar = false
+                            }
+                        )
+                        MiniCallFeatureChip(
+                            icon = Icons.Rounded.RecordVoiceOver,
+                            label = strings.voiceChangerLabel,
+                            active = showVoiceFxBar || selectedVoiceEffect != VoiceEffectType.NORMAL,
+                            accent = CordlyEmerald,
+                            testTag = "call_voice_fx_toggle",
+                            onClick = {
+                                showVoiceFxBar = !showVoiceFxBar
+                                showQualityBar = false
+                                showFilterBar = false
+                            }
+                        )
+                        MiniCallFeatureChip(
+                            icon = if (isRecordingCall) Icons.Rounded.Stop else Icons.Rounded.FiberManualRecord,
+                            label = if (isRecordingCall) strings.stopRecordingLabel else strings.recordCallLabel,
+                            active = isRecordingCall,
+                            accent = CordlyCrimson,
+                            testTag = "call_record_toggle",
+                            onClick = {
+                                if (!isUltraOrPlus) {
+                                    onStatusToast(strings.ultraFeatureLockedNotice)
+                                } else if (!isRecordingCall) {
+                                    audioEngine.startCallRecording(call.id)
+                                    isRecordingCall = true
+                                    onStatusToast(strings.recordingStartedNotice)
+                                } else {
+                                    val saved = audioEngine.stopCallRecording()
+                                    isRecordingCall = false
+                                    onStatusToast(
+                                        if (saved != null) strings.recordingSavedNotice else "Recording stopped"
+                                    )
                                 }
-                                onToggleVideo(next)
                             }
                         )
+                    }
 
-                        CallControlPill(
-                            icon = if (isSpeakerOn) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
-                            label = strings.speakerOn,
-                            active = isSpeakerOn,
-                            activeColor = CordlyCyan.copy(alpha = 0.25f),
-                            inactiveColor = CordlyCardSurface,
-                            testTag = "call_speaker_button",
-                            onClick = { isSpeakerOn = !isSpeakerOn }
-                        )
+                    // Bottom Call Controls Bar
+                    Surface(
+                        color = CordlySurfaceDark,
+                        shape = RoundedCornerShape(24.dp),
+                        border = BorderStroke(1.dp, CordlyDivider),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 10.dp, horizontal = 8.dp)
+                        ) {
+                            CallControlPill(
+                                icon = if (isMuted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
+                                label = if (isMuted) strings.unmuteMic else strings.muteMic,
+                                active = !isMuted,
+                                activeColor = CordlyElevatedSurface,
+                                inactiveColor = CordlyCrimson,
+                                testTag = "call_mute_button",
+                                onClick = {
+                                    isMuted = !isMuted
+                                    onToggleMute(isMuted)
+                                }
+                            )
 
-                        CallControlPill(
-                            icon = Icons.Rounded.CallEnd,
-                            label = strings.endCall,
-                            active = false,
-                            activeColor = CordlyCrimson,
-                            inactiveColor = CordlyCrimson,
-                            testTag = "call_end_button",
-                            onClick = onEndCall
-                        )
+                            CallControlPill(
+                                icon = if (isVideoEnabled) Icons.Rounded.Videocam else Icons.Rounded.VideocamOff,
+                                label = if (isVideoEnabled) strings.cameraOff else strings.cameraOn,
+                                active = isVideoEnabled,
+                                activeColor = CordlyBlurple,
+                                inactiveColor = CordlyCardSurface,
+                                testTag = "call_video_button",
+                                onClick = {
+                                    val next = !isVideoEnabled
+                                    isVideoEnabled = next
+                                    if (next && !hasCameraPermission) {
+                                        permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+                                    }
+                                    onToggleVideo(next)
+                                }
+                            )
+
+                            CallControlPill(
+                                icon = if (isSpeakerOn) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
+                                label = strings.speakerOn,
+                                active = isSpeakerOn,
+                                activeColor = CordlyCyan.copy(alpha = 0.25f),
+                                inactiveColor = CordlyCardSurface,
+                                testTag = "call_speaker_button",
+                                onClick = { isSpeakerOn = !isSpeakerOn }
+                            )
+
+                            CallControlPill(
+                                icon = Icons.Rounded.CallEnd,
+                                label = strings.endCall,
+                                active = false,
+                                activeColor = CordlyCrimson,
+                                inactiveColor = CordlyCrimson,
+                                testTag = "call_end_button",
+                                onClick = {
+                                    if (isRecordingCall) {
+                                        audioEngine.stopCallRecording()
+                                        isRecordingCall = false
+                                    }
+                                    SoundEffectsManager.play(AppSoundEffect.CALL_END)
+                                    onEndCall()
+                                }
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+
+    // Neo Plus Multi-Person Add Friend Dialog
+    if (showAddFriendDialog) {
+        val available = inviteableFriends.filter { !call.participantIds.contains(it.uid) }
+        AlertDialog(
+            onDismissRequest = { showAddFriendDialog = false },
+            containerColor = CordlySurfaceDark,
+            title = { Text(strings.addToCall, color = CordlyTextPrimary) },
+            text = {
+                if (available.isEmpty()) {
+                    Text(strings.noFriendsToAddCall, color = CordlyTextSecondary)
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(available, key = { it.uid }) { friend ->
+                            Surface(
+                                color = CordlyCardSurface,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        onAddParticipant(friend.uid, friend.name)
+                                        showAddFriendDialog = false
+                                    }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(10.dp)
+                                ) {
+                                    UserAvatar(displayName = friend.name, photoUrl = friend.photoUrl, size = 36.dp)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(friend.name, color = CordlyTextPrimary, modifier = Modifier.weight(1f))
+                                    Icon(Icons.Rounded.PersonAdd, contentDescription = null, tint = Color(0xFFFFD166))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAddFriendDialog = false }) {
+                    Text(strings.closeButton, color = CordlyTextSecondary)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun MiniCallFeatureChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    accent: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = if (active) accent.copy(alpha = 0.22f) else CordlyCardSurface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, if (active) accent else CordlyDivider),
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+        ) {
+            Icon(icon, contentDescription = label, tint = if (active) accent else CordlyTextSecondary, modifier = Modifier.size(15.dp))
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, color = if (active) Color.White else CordlyTextSecondary, maxLines = 1)
         }
     }
 }
@@ -651,7 +1049,8 @@ private fun VoiceParticipantTile(
     name: String,
     photoUrl: String?,
     audioLevel: Double,
-    muted: Boolean
+    muted: Boolean,
+    badge: String? = null
 ) {
     val speaking = audioLevel > 0.12 && !muted
     Surface(
@@ -688,7 +1087,7 @@ private fun VoiceParticipantTile(
                     size = 76.dp
                 )
             }
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = if (muted) Icons.Rounded.MicOff else Icons.Rounded.GraphicEq,
@@ -703,6 +1102,13 @@ private fun VoiceParticipantTile(
                     color = CordlyTextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (!badge.isNullOrBlank()) {
+                Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CordlyCyan
                 )
             }
         }
@@ -730,18 +1136,18 @@ private fun CallControlPill(
         Surface(
             color = if (active) activeColor else inactiveColor,
             shape = CircleShape,
-            modifier = Modifier.size(52.dp)
+            modifier = Modifier.size(48.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = icon,
                     contentDescription = label,
                     tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
@@ -755,6 +1161,8 @@ private fun CallControlPill(
 @Composable
 private fun CameraXLivePreview(
     useFrontCamera: Boolean,
+    qualityPreset: VideoQualityPreset,
+    faceFilter: CallFaceFilter,
     onFrameEncoded: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -763,10 +1171,15 @@ private fun CameraXLivePreview(
     val previewView = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            scaleType = PreviewView.ScaleType.FIT_CENTER
         }
     }
     val executor = remember { Executors.newSingleThreadExecutor() }
     val lastEncodedMs = remember { longArrayOf(0L) }
+    val activeQualityRef = remember { arrayOf(qualityPreset) }
+    val activeFilterRef = remember { arrayOf(faceFilter) }
+    activeQualityRef[0] = qualityPreset
+    activeFilterRef[0] = faceFilter
 
     DisposableEffect(Unit) {
         onDispose {
@@ -791,9 +1204,14 @@ private fun CameraXLivePreview(
                     .build()
                 analysis.setAnalyzer(executor) { imageProxy ->
                     val now = System.currentTimeMillis()
-                    if (now - lastEncodedMs[0] >= 1100L) {
+                    if (now - lastEncodedMs[0] >= 900L) {
                         lastEncodedMs[0] = now
-                        encodeProxyToDataUri(imageProxy, useFrontCamera)?.let { dataUri ->
+                        CallVideoFrameProcessor.encodeProxyToDataUri(
+                            image = imageProxy,
+                            mirror = useFrontCamera,
+                            qualityPreset = activeQualityRef[0],
+                            faceFilter = activeFilterRef[0]
+                        )?.let { dataUri ->
                             onFrameEncoded(dataUri)
                         }
                     }
@@ -807,56 +1225,28 @@ private fun CameraXLivePreview(
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, analysis)
             } catch (_: Exception) {
-                // Camera may be unavailable in headless emulators without camera hardware
             }
         }, ContextCompat.getMainExecutor(context))
     }
 
-    AndroidView(
-        factory = { previewView },
-        modifier = modifier
-    )
-}
-
-private fun encodeProxyToDataUri(image: ImageProxy, mirror: Boolean): String? {
-    return try {
-        val nv21 = yuv420888ToNv21(image) ?: return null
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-        val rawOut = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 55, rawOut)
-        val rawBytes = rawOut.toByteArray()
-        val decoded = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return null
-
-        val matrix = Matrix().apply {
-            postRotate(image.imageInfo.rotationDegrees.toFloat())
-            if (mirror) postScale(-1f, 1f)
+    Box(modifier = modifier) {
+        AndroidView(
+            factory = { previewView },
+            modifier = Modifier.fillMaxSize()
+        )
+        if (faceFilter != CallFaceFilter.NONE) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                drawIntoCanvas { canvas ->
+                    CallVideoFrameProcessor.drawFaceFilterOnCanvas(
+                        canvas.nativeCanvas,
+                        size.width,
+                        size.height,
+                        faceFilter
+                    )
+                }
+            }
         }
-        val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-        val scaled = Bitmap.createScaledBitmap(rotated, 160, 120, true)
-        val jpegOut = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, 48, jpegOut)
-        if (rotated !== decoded) rotated.recycle()
-        decoded.recycle()
-        scaled.recycle()
-        val encoded = Base64.encodeToString(jpegOut.toByteArray(), Base64.NO_WRAP)
-        "data:image/jpeg;base64,$encoded"
-    } catch (_: Exception) {
-        null
     }
-}
-
-private fun yuv420888ToNv21(image: ImageProxy): ByteArray? {
-    val yBuffer = image.planes.getOrNull(0)?.buffer ?: return null
-    val uBuffer = image.planes.getOrNull(1)?.buffer ?: return null
-    val vBuffer = image.planes.getOrNull(2)?.buffer ?: return null
-    val ySize = yBuffer.remaining()
-    val uSize = uBuffer.remaining()
-    val vSize = vBuffer.remaining()
-    val nv21 = ByteArray(ySize + uSize + vSize)
-    yBuffer.get(nv21, 0, ySize)
-    vBuffer.get(nv21, ySize, vSize)
-    uBuffer.get(nv21, ySize + vSize, uSize)
-    return nv21
 }
 
 private fun decodeBase64Bitmap(dataUri: String?): Bitmap? {
@@ -867,61 +1257,5 @@ private fun decodeBase64Bitmap(dataUri: String?): Bitmap? {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     } catch (_: Exception) {
         null
-    }
-}
-
-@SuppressLint("MissingPermission")
-private suspend fun sampleMicAmplitude(
-    shouldContinue: () -> Boolean,
-    onAmplitude: (Double) -> Unit
-) {
-    val sampleRate = 16000
-    val bufferSize = AudioRecord.getMinBufferSize(
-        sampleRate,
-        AudioFormat.CHANNEL_IN_MONO,
-        AudioFormat.ENCODING_PCM_16BIT
-    ).coerceAtLeast(1024)
-    val recorder = try {
-        AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            sampleRate,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize
-        )
-    } catch (_: Exception) {
-        null
-    } ?: return
-
-    if (recorder.state != AudioRecord.STATE_INITIALIZED) {
-        recorder.release()
-        return
-    }
-
-    val buffer = ShortArray(bufferSize / 2)
-    try {
-        recorder.startRecording()
-        while (shouldContinue()) {
-            val read = recorder.read(buffer, 0, buffer.size)
-            if (read > 0) {
-                var peak = 0
-                for (i in 0 until read) {
-                    val sample = abs(buffer[i].toInt())
-                    if (sample > peak) peak = sample
-                }
-                val normalized = (peak / 12000.0).coerceIn(0.0, 1.0)
-                withContext(Dispatchers.Main) {
-                    onAmplitude(normalized)
-                }
-            }
-            delay(180L)
-        }
-    } catch (_: Exception) {
-    } finally {
-        try {
-            recorder.stop()
-        } catch (_: Exception) {
-        }
-        recorder.release()
     }
 }

@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddTask
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Settings
@@ -72,6 +73,7 @@ import kotlin.math.min
 import kotlin.math.sin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -626,6 +628,28 @@ fun UserAvatar(
                 }
             }
         }
+        val artRes = frame.artworkResId
+        if (artRes != null && size >= 38.dp) {
+            val emblemSize = (size.value * 0.36f).coerceIn(15f, 32f).dp
+            Surface(
+                color = CordlySurfaceDark,
+                shape = CircleShape,
+                border = BorderStroke(1.5.dp, primaryGlow),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 2.dp, y = (-2).dp)
+                    .size(emblemSize)
+            ) {
+                Image(
+                    painter = painterResource(artRes),
+                    contentDescription = frame.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                )
+            }
+        }
         if (status != null) {
             Box(
                 modifier = Modifier
@@ -696,6 +720,7 @@ fun ServerRail(
     pendingRequestCount: Int,
     hasWallpaper: Boolean = false,
     onSelectHome: () -> Unit,
+    onOpenQuestsClick: () -> Unit = {},
     onSelectServer: (Server) -> Unit,
     onCreateServerClick: () -> Unit,
     onJoinServerClick: () -> Unit,
@@ -729,6 +754,17 @@ fun ServerRail(
                 modifier = Modifier.size(24.dp)
             )
         }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Dedicated Quests & Ultra Directory Button ("المهام")
+        RailActionButton(
+            icon = Icons.Rounded.AddTask,
+            contentDescription = strings.questsTabTitle,
+            tint = CordlyAmber,
+            testTag = "rail_quests_button",
+            onClick = onOpenQuestsClick
+        )
 
         HorizontalDivider(
             color = CordlyDivider,
@@ -934,13 +970,21 @@ fun UserDockBar(
             )
             Spacer(modifier = Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = profile?.displayName ?: "Loading...",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = CordlyTextPrimary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                val effectiveRank = com.example.data.repository.CordlyRepository.effectiveRank(profile)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Text(
+                        text = profile?.displayName ?: "Loading...",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = CordlyTextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    RankBadgePill(rank = effectiveRank)
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1080,3 +1124,44 @@ fun EmptyPlaceholder(
         }
     }
 }
+
+@Composable
+fun RankBadgePill(
+    rank: String?,
+    modifier: Modifier = Modifier
+) {
+    when (rank) {
+        com.example.data.repository.CordlyRepository.RANK_NEO_PLUS -> {
+            Surface(
+                color = CordlyAmber,
+                shape = RoundedCornerShape(6.dp),
+                modifier = modifier
+            ) {
+                Text(
+                    text = "NEO+",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Black,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                )
+            }
+        }
+        com.example.data.repository.CordlyRepository.RANK_ULTRA -> {
+            Surface(
+                color = CordlyCyan.copy(alpha = 0.22f),
+                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.dp, CordlyCyan.copy(alpha = 0.7f)),
+                modifier = modifier
+            ) {
+                Text(
+                    text = "ULTRA",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CordlyCyan,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                )
+            }
+        }
+    }
+}
+

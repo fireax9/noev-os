@@ -264,6 +264,24 @@ object VideoEffectHelper {
         return null
     }
 
+    fun resolveAvatarVideoSource(
+        context: Context,
+        uid: String,
+        avatarVideoData: String?
+    ): ProfileVideoSource? {
+        if (!avatarVideoData.isNullOrBlank() && avatarVideoData.startsWith(DATA_VIDEO_PREFIX)) {
+            val cached = materializeDataUriToCache(context, "avatar_$uid", avatarVideoData)
+            if (cached != null && cached.exists()) {
+                return ProfileVideoSource.LocalFile(cached)
+            }
+        }
+        val localFile = AppAppearanceStore.customAvatarVideoFile(context, uid)
+        if (localFile.exists() && localFile.length() > 0L) {
+            return ProfileVideoSource.LocalFile(localFile)
+        }
+        return null
+    }
+
     private fun materializeDataUriToCache(
         context: Context,
         uid: String,

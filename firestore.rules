@@ -29,12 +29,28 @@ service cloud.firestore {
       return status in ['online', 'idle', 'dnd', 'offline'];
     }
 
+    function isValidRank(rank) {
+      return rank in ['normal', 'ultra', 'neo_plus'];
+    }
+
     function isValidTimestamp(ts) {
       return ts is timestamp && ts <= request.time;
     }
 
     function isValidMediaString(val) {
       return val is string && val.size() <= 120000;
+    }
+
+    function isValidChatMediaString(val) {
+      return val is string && val.size() <= 500000;
+    }
+
+    function isValidStreamFrameString(val) {
+      return val is string && val.size() <= 250000;
+    }
+
+    function isValidAudioPacketString(val) {
+      return val is string && val.size() <= 60000;
     }
 
     function isValidVideoDataString(val) {
@@ -51,16 +67,25 @@ service cloud.firestore {
              (!('photoUrl' in data) || data.photoUrl == null || isValidMediaString(data.photoUrl)) &&
              (!('bannerUrl' in data) || data.bannerUrl == null || isValidMediaString(data.bannerUrl)) &&
              (!('customStatus' in data) || data.customStatus == null || (data.customStatus is string && data.customStatus.size() <= 120)) &&
-             (!('peyPoints' in data) || (data.peyPoints is int && data.peyPoints >= 0 && data.peyPoints <= 10000000)) &&
-             (!('ownedFrames' in data) || (data.ownedFrames is list && data.ownedFrames.size() >= 1 && data.ownedFrames.size() <= 30)) &&
+             (!('peyPoints' in data) || (data.peyPoints is int && data.peyPoints >= 0 && data.peyPoints <= 100000000)) &&
+             (!('ownedFrames' in data) || (data.ownedFrames is list && data.ownedFrames.size() >= 1 && data.ownedFrames.size() <= 40)) &&
              (!('equippedFrame' in data) || (data.equippedFrame is string && data.equippedFrame.size() >= 1 && data.equippedFrame.size() <= 40)) &&
-             (!('ownedProfileEffects' in data) || (data.ownedProfileEffects is list && data.ownedProfileEffects.size() >= 1 && data.ownedProfileEffects.size() <= 30)) &&
+             (!('ownedCardFrames' in data) || (data.ownedCardFrames is list && data.ownedCardFrames.size() >= 1 && data.ownedCardFrames.size() <= 40)) &&
+             (!('equippedCardFrame' in data) || (data.equippedCardFrame is string && data.equippedCardFrame.size() >= 1 && data.equippedCardFrame.size() <= 40)) &&
+             (!('ownedProfileEffects' in data) || (data.ownedProfileEffects is list && data.ownedProfileEffects.size() >= 1 && data.ownedProfileEffects.size() <= 40)) &&
              (!('equippedProfileEffect' in data) || (data.equippedProfileEffect is string && data.equippedProfileEffect.size() >= 1 && data.equippedProfileEffect.size() <= 40)) &&
              (!('profileVideoData' in data) || data.profileVideoData == null || isValidVideoDataString(data.profileVideoData)) &&
+             (!('avatarVideoData' in data) || data.avatarVideoData == null || isValidVideoDataString(data.avatarVideoData)) &&
+             (!('rank' in data) || isValidRank(data.rank)) &&
+             (!('rankExpiresAtMs' in data) || (data.rankExpiresAtMs is int && data.rankExpiresAtMs >= 0)) &&
+             (!('ultraTrialUsed' in data) || data.ultraTrialUsed is bool) &&
+             (!('neoPlusTrialUsed' in data) || data.neoPlusTrialUsed is bool) &&
+             (!('profileThemeColorHex' in data) || data.profileThemeColorHex == null || (data.profileThemeColorHex is string && data.profileThemeColorHex.size() >= 4 && data.profileThemeColorHex.size() <= 12)) &&
              (!('rewardedFriendUids' in data) || (data.rewardedFriendUids is list && data.rewardedFriendUids.size() <= 200)) &&
              (!('dailyClaimsCount' in data) || (data.dailyClaimsCount is int && data.dailyClaimsCount >= 0 && data.dailyClaimsCount <= 100000)) &&
              (!('lastDailyClaimAtMs' in data) || (data.lastDailyClaimAtMs is int && data.lastDailyClaimAtMs >= 0)) &&
              (!('channelRewardClaimed' in data) || data.channelRewardClaimed is bool) &&
+             (!('claimedCustomQuests' in data) || (data.claimedCustomQuests is list && data.claimedCustomQuests.size() <= 200)) &&
              isValidTimestamp(data.createdAt) &&
              (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
     }
@@ -74,8 +99,13 @@ service cloud.firestore {
              (!('bannerUrl' in data) || data.bannerUrl == null || isValidMediaString(data.bannerUrl)) &&
              (!('customStatus' in data) || data.customStatus == null || (data.customStatus is string && data.customStatus.size() <= 120)) &&
              (!('equippedFrame' in data) || (data.equippedFrame is string && data.equippedFrame.size() >= 1 && data.equippedFrame.size() <= 40)) &&
+             (!('equippedCardFrame' in data) || (data.equippedCardFrame is string && data.equippedCardFrame.size() >= 1 && data.equippedCardFrame.size() <= 40)) &&
              (!('equippedProfileEffect' in data) || (data.equippedProfileEffect is string && data.equippedProfileEffect.size() >= 1 && data.equippedProfileEffect.size() <= 40)) &&
              (!('profileVideoData' in data) || data.profileVideoData == null || isValidVideoDataString(data.profileVideoData)) &&
+             (!('avatarVideoData' in data) || data.avatarVideoData == null || isValidVideoDataString(data.avatarVideoData)) &&
+             (!('rank' in data) || isValidRank(data.rank)) &&
+             (!('rankExpiresAtMs' in data) || (data.rankExpiresAtMs is int && data.rankExpiresAtMs >= 0)) &&
+             (!('profileThemeColorHex' in data) || data.profileThemeColorHex == null || (data.profileThemeColorHex is string && data.profileThemeColorHex.size() >= 4 && data.profileThemeColorHex.size() <= 12)) &&
              isValidTimestamp(data.createdAt) &&
              (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
     }
@@ -126,6 +156,10 @@ service cloud.firestore {
              (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
     }
 
+    function isValidMessageType(msgType) {
+      return msgType in ['text', 'image', 'audio', 'sticker', 'gif', 'deleted'];
+    }
+
     function isValidDirectMessage(data) {
       return data.conversationId is string && data.conversationId.size() >= 1 && data.conversationId.size() <= 128 &&
              data.participantIds is list && data.participantIds.size() == 2 &&
@@ -134,9 +168,15 @@ service cloud.firestore {
              (data.senderId in data.participantIds) &&
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
              (!('senderPhoto' in data) || data.senderPhoto == null || isValidMediaString(data.senderPhoto)) &&
-             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             (!('senderRank' in data) || data.senderRank == null || isValidRank(data.senderRank)) &&
+             data.text is string && data.text.size() >= 0 && data.text.size() <= 2000 &&
+             (!('messageType' in data) || data.messageType == null || isValidMessageType(data.messageType)) &&
+             (!('mediaData' in data) || data.mediaData == null || isValidChatMediaString(data.mediaData)) &&
+             (!('mediaDurationMs' in data) || data.mediaDurationMs == null || (data.mediaDurationMs is int && data.mediaDurationMs >= 0 && data.mediaDurationMs <= 3600000)) &&
              (!('replyToText' in data) || data.replyToText == null || (data.replyToText is string && data.replyToText.size() <= 200)) &&
              (!('edited' in data) || data.edited == null || data.edited is bool) &&
+             (!('hiddenFor' in data) || (data.hiddenFor is list && data.hiddenFor.size() <= 25)) &&
+             (!('deletedForEveryone' in data) || data.deletedForEveryone == null || data.deletedForEveryone is bool) &&
              isValidTimestamp(data.createdAt) &&
              (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
     }
@@ -178,11 +218,21 @@ service cloud.firestore {
              (data.senderId in data.memberUids) &&
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
              (!('senderPhoto' in data) || data.senderPhoto == null || isValidMediaString(data.senderPhoto)) &&
-             data.text is string && data.text.size() >= 1 && data.text.size() <= 2000 &&
+             (!('senderRank' in data) || data.senderRank == null || isValidRank(data.senderRank)) &&
+             data.text is string && data.text.size() >= 0 && data.text.size() <= 2000 &&
+             (!('messageType' in data) || data.messageType == null || isValidMessageType(data.messageType)) &&
+             (!('mediaData' in data) || data.mediaData == null || isValidChatMediaString(data.mediaData)) &&
+             (!('mediaDurationMs' in data) || data.mediaDurationMs == null || (data.mediaDurationMs is int && data.mediaDurationMs >= 0 && data.mediaDurationMs <= 3600000)) &&
              (!('replyToText' in data) || data.replyToText == null || (data.replyToText is string && data.replyToText.size() <= 200)) &&
              (!('edited' in data) || data.edited == null || data.edited is bool) &&
+             (!('hiddenFor' in data) || (data.hiddenFor is list && data.hiddenFor.size() <= 25)) &&
+             (!('deletedForEveryone' in data) || data.deletedForEveryone == null || data.deletedForEveryone is bool) &&
              isValidTimestamp(data.createdAt) &&
              (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidVideoQuality(q) {
+      return q in ['144p', '240p', '360p', '480p', '720p', '1080p', '4K'];
     }
 
     function isValidCallSession(data) {
@@ -200,6 +250,7 @@ service cloud.firestore {
              (!('channelName' in data) || data.channelName == null || (data.channelName is string && data.channelName.size() <= 40)) &&
              data.callType in ['voice', 'video'] &&
              data.status in ['ringing', 'active', 'ended', 'declined'] &&
+             (!('videoQuality' in data) || isValidVideoQuality(data.videoQuality)) &&
              (!('callerMuted' in data) || data.callerMuted is bool) &&
              (!('calleeMuted' in data) || data.calleeMuted is bool) &&
              (!('callerVideoOn' in data) || data.callerVideoOn is bool) &&
@@ -214,11 +265,46 @@ service cloud.firestore {
              data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
              data.participantIds is list && data.participantIds.size() >= 1 && data.participantIds.size() <= 25 &&
              (data.senderId in data.participantIds) &&
-             (!('frameData' in data) || data.frameData == null || isValidMediaString(data.frameData)) &&
+             (!('frameData' in data) || data.frameData == null || isValidStreamFrameString(data.frameData)) &&
+             (!('audioData' in data) || data.audioData == null || isValidAudioPacketString(data.audioData)) &&
+             (!('audioSeq' in data) || (data.audioSeq is int && data.audioSeq >= 0)) &&
+             (!('voiceEffect' in data) || (data.voiceEffect is string && data.voiceEffect.size() <= 30)) &&
+             (!('faceFilter' in data) || (data.faceFilter is string && data.faceFilter.size() <= 30)) &&
+             (!('videoQuality' in data) || isValidVideoQuality(data.videoQuality)) &&
              (data.audioLevel is int || data.audioLevel is float) && data.audioLevel >= 0 && data.audioLevel <= 1.0 &&
              data.videoEnabled is bool &&
              data.muted is bool &&
              isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCustomQuest(data) {
+      return data.creatorId is string && data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 60 &&
+             data.creatorRank == 'neo_plus' &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 120 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 300)) &&
+             data.questType in ['add_friends', 'daily_check'] &&
+             data.targetCount is int && data.targetCount >= 1 && data.targetCount <= 50 &&
+             data.rewardPerStep is int && data.rewardPerStep >= 50 && data.rewardPerStep <= 1000 &&
+             data.totalReward is int && data.totalReward >= 50 && data.totalReward <= 10000 &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidDeveloperTicket(data) {
+      return data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 60 &&
+             data.senderRank == 'neo_plus' &&
+             data.subject is string && data.subject.size() >= 2 && data.subject.size() <= 120 &&
+             data.message is string && data.message.size() >= 2 && data.message.size() <= 1500 &&
+             data.status in ['sent', 'reviewed', 'replied'] &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isUserNeoPlus(uid) {
+      return exists(/databases/$(database)/documents/users/$(uid)) &&
+             get(/databases/$(database)/documents/users/$(uid)).data.rank == 'neo_plus';
     }
 
     // --- 1. Private User Profile (Owner-Only PII) ---
@@ -233,10 +319,11 @@ service cloud.firestore {
                        incoming().keys().hasOnly([
                          'userId', 'email', 'displayName', 'friendCode', 'status',
                          'photoUrl', 'bannerUrl', 'customStatus',
-                         'peyPoints', 'ownedFrames', 'equippedFrame',
-                         'ownedProfileEffects', 'equippedProfileEffect', 'profileVideoData',
+                         'peyPoints', 'ownedFrames', 'equippedFrame', 'ownedCardFrames', 'equippedCardFrame',
+                         'ownedProfileEffects', 'equippedProfileEffect', 'profileVideoData', 'avatarVideoData',
+                         'rank', 'rankExpiresAtMs', 'ultraTrialUsed', 'neoPlusTrialUsed', 'profileThemeColorHex',
                          'rewardedFriendUids', 'dailyClaimsCount', 'lastDailyClaimAtMs', 'channelRewardClaimed',
-                         'createdAt', 'updatedAt'
+                         'claimedCustomQuests', 'createdAt', 'updatedAt'
                        ]) &&
                        isValidUserPrivate(incoming());
 
@@ -249,10 +336,11 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'email', 'displayName', 'friendCode', 'status',
                          'photoUrl', 'bannerUrl', 'customStatus',
-                         'peyPoints', 'ownedFrames', 'equippedFrame',
-                         'ownedProfileEffects', 'equippedProfileEffect', 'profileVideoData',
+                         'peyPoints', 'ownedFrames', 'equippedFrame', 'ownedCardFrames', 'equippedCardFrame',
+                         'ownedProfileEffects', 'equippedProfileEffect', 'profileVideoData', 'avatarVideoData',
+                         'rank', 'rankExpiresAtMs', 'ultraTrialUsed', 'neoPlusTrialUsed', 'profileThemeColorHex',
                          'rewardedFriendUids', 'dailyClaimsCount', 'lastDailyClaimAtMs', 'channelRewardClaimed',
-                         'updatedAt'
+                         'claimedCustomQuests', 'updatedAt'
                        ]) &&
                        isValidTimestamp(incoming().updatedAt);
 
@@ -262,7 +350,10 @@ service cloud.firestore {
     // --- 2. Public Profile Cards (Non-PII) ---
     match /public_profiles/{userId} {
       allow get: if isSignedIn() && isValidId(userId);
-      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        resource.data.rank in ['ultra', 'neo_plus']
+      );
 
       allow create: if isSignedIn() &&
                        isValidId(userId) &&
@@ -272,7 +363,8 @@ service cloud.firestore {
                        incoming().keys().hasOnly([
                          'userId', 'displayName', 'friendCode', 'status',
                          'photoUrl', 'bannerUrl', 'customStatus',
-                         'equippedFrame', 'equippedProfileEffect', 'profileVideoData',
+                         'equippedFrame', 'equippedCardFrame', 'equippedProfileEffect', 'profileVideoData', 'avatarVideoData',
+                         'rank', 'rankExpiresAtMs', 'profileThemeColorHex',
                          'createdAt', 'updatedAt'
                        ]) &&
                        isValidPublicProfile(incoming());
@@ -286,7 +378,8 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'displayName', 'friendCode', 'status',
                          'photoUrl', 'bannerUrl', 'customStatus',
-                         'equippedFrame', 'equippedProfileEffect', 'profileVideoData',
+                         'equippedFrame', 'equippedCardFrame', 'equippedProfileEffect', 'profileVideoData', 'avatarVideoData',
+                         'rank', 'rankExpiresAtMs', 'profileThemeColorHex',
                          'updatedAt'
                        ]) &&
                        isValidTimestamp(incoming().updatedAt);
@@ -390,7 +483,11 @@ service cloud.firestore {
                          incoming().senderId == request.auth.uid &&
                          (request.auth.uid in incoming().participantIds) &&
                          incoming().keys().hasAll(['conversationId', 'participantIds', 'senderId', 'senderName', 'text', 'createdAt']) &&
-                         incoming().keys().hasOnly(['conversationId', 'participantIds', 'senderId', 'senderName', 'senderPhoto', 'text', 'replyToText', 'edited', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'conversationId', 'participantIds', 'senderId', 'senderName', 'senderPhoto', 'senderRank',
+                           'text', 'messageType', 'mediaData', 'mediaDurationMs', 'replyToText', 'edited',
+                           'hiddenFor', 'deletedForEveryone', 'createdAt', 'updatedAt'
+                         ]) &&
                          isValidDirectMessage(incoming()) &&
                          exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
                          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds) &&
@@ -399,13 +496,22 @@ service cloud.firestore {
         allow update: if isSignedIn() &&
                          isValidId(messageId) &&
                          isValidDirectMessage(incoming()) &&
-                         existing().senderId == request.auth.uid &&
                          incoming().senderId == existing().senderId &&
                          incoming().conversationId == existing().conversationId &&
                          incoming().participantIds == existing().participantIds &&
                          incoming().createdAt == existing().createdAt &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['text', 'edited', 'updatedAt']) &&
-                         isValidTimestamp(incoming().updatedAt);
+                         isValidTimestamp(incoming().updatedAt) &&
+                         (
+                           // Sender edits own message OR deletes for everyone
+                           (existing().senderId == request.auth.uid &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['text', 'edited', 'messageType', 'mediaData', 'mediaDurationMs', 'deletedForEveryone', 'updatedAt'])) ||
+                           // Participant deletes for me (appends own UID to hiddenFor)
+                           ((request.auth.uid in existing().participantIds) &&
+                            (request.auth.uid in incoming().hiddenFor) &&
+                            (!('hiddenFor' in existing()) || incoming().hiddenFor.hasAll(existing().hiddenFor)) &&
+                            incoming().text == existing().text &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['hiddenFor', 'updatedAt']))
+                         );
 
         allow delete: if isSignedIn() && isValidId(messageId) && existing().senderId == request.auth.uid;
       }
@@ -432,9 +538,9 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        isValidTimestamp(incoming().updatedAt) &&
                        (
-                         // Action 1: Owner updates server metadata, photo iconUrl, or channels
+                         // Action 1: Owner updates server metadata, photo iconUrl, channels, or removes member
                          (request.auth.uid == existing().ownerId &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'iconEmoji', 'iconUrl', 'accentHex', 'channels', 'updatedAt'])) ||
+                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'iconEmoji', 'iconUrl', 'accentHex', 'channels', 'memberUids', 'updatedAt'])) ||
                          // Action 2: Friend joins via valid invite code or server name lookup
                          (!(request.auth.uid in existing().memberUids) &&
                           incoming().memberUids.hasAll(existing().memberUids) &&
@@ -449,7 +555,11 @@ service cloud.firestore {
                           !(request.auth.uid in incoming().memberUids) &&
                           existing().memberUids.hasAll(incoming().memberUids) &&
                           incoming().memberUids.size() == existing().memberUids.size() - 1 &&
-                          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt']))
+                          incoming().diff(existing()).affectedKeys().hasOnly(['memberUids', 'updatedAt'])) ||
+                         // Action 4: Neo Plus member with Full Server Control inside a server they belong to
+                         ((request.auth.uid in existing().memberUids) &&
+                          isUserNeoPlus(request.auth.uid) &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'iconEmoji', 'iconUrl', 'accentHex', 'channels', 'memberUids', 'updatedAt']))
                        );
 
       allow delete: if isSignedIn() && isValidId(serverId) && existing().ownerId == request.auth.uid;
@@ -464,7 +574,11 @@ service cloud.firestore {
                          incoming().senderId == request.auth.uid &&
                          (request.auth.uid in incoming().memberUids) &&
                          incoming().keys().hasAll(['serverId', 'channelName', 'memberUids', 'senderId', 'senderName', 'text', 'createdAt']) &&
-                         incoming().keys().hasOnly(['serverId', 'channelName', 'memberUids', 'senderId', 'senderName', 'senderPhoto', 'text', 'replyToText', 'edited', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'serverId', 'channelName', 'memberUids', 'senderId', 'senderName', 'senderPhoto', 'senderRank',
+                           'text', 'messageType', 'mediaData', 'mediaDurationMs', 'replyToText', 'edited',
+                           'hiddenFor', 'deletedForEveryone', 'createdAt', 'updatedAt'
+                         ]) &&
                          isValidServerMessage(incoming()) &&
                          exists(/databases/$(database)/documents/servers/$(serverId)) &&
                          (request.auth.uid in get(/databases/$(database)/documents/servers/$(serverId)).data.memberUids) &&
@@ -479,11 +593,19 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt &&
                          isValidTimestamp(incoming().updatedAt) &&
                          (
-                           // Action 1: Author edits own message
-                           (existing().senderId == request.auth.uid &&
+                           // Action 1: Author or Server Owner or Neo Plus member edits/deletes for everyone
+                           ((existing().senderId == request.auth.uid ||
+                             get(/databases/$(database)/documents/servers/$(serverId)).data.ownerId == request.auth.uid) &&
                             incoming().memberUids == existing().memberUids &&
-                            incoming().diff(existing()).affectedKeys().hasOnly(['text', 'edited', 'updatedAt'])) ||
-                           // Action 2: Newly joined member syncs membership on existing messages
+                            incoming().diff(existing()).affectedKeys().hasOnly(['text', 'edited', 'messageType', 'mediaData', 'mediaDurationMs', 'deletedForEveryone', 'updatedAt'])) ||
+                           // Action 2: Server member hides message for self (Delete for Me)
+                           ((request.auth.uid in existing().memberUids) &&
+                            incoming().memberUids == existing().memberUids &&
+                            (request.auth.uid in incoming().hiddenFor) &&
+                            (!('hiddenFor' in existing()) || incoming().hiddenFor.hasAll(existing().hiddenFor)) &&
+                            incoming().text == existing().text &&
+                            incoming().diff(existing()).affectedKeys().hasOnly(['hiddenFor', 'updatedAt'])) ||
+                           // Action 3: Newly joined member syncs membership on existing messages
                            ((request.auth.uid in get(/databases/$(database)/documents/servers/$(serverId)).data.memberUids) &&
                             incoming().memberUids.hasAll(existing().memberUids) &&
                             incoming().memberUids.size() == existing().memberUids.size() + 1 &&
@@ -495,7 +617,8 @@ service cloud.firestore {
         allow delete: if isSignedIn() &&
                          isValidId(messageId) &&
                          (existing().senderId == request.auth.uid ||
-                          get(/databases/$(database)/documents/servers/$(serverId)).data.ownerId == request.auth.uid);
+                          get(/databases/$(database)/documents/servers/$(serverId)).data.ownerId == request.auth.uid ||
+                          ((request.auth.uid in existing().memberUids) && isUserNeoPlus(request.auth.uid)));
       }
     }
 
@@ -539,7 +662,7 @@ service cloud.firestore {
                        incoming().keys().hasAll(['callerId', 'callerName', 'calleeName', 'participantIds', 'targetType', 'targetId', 'callType', 'status', 'createdAt']) &&
                        incoming().keys().hasOnly([
                          'callerId', 'callerName', 'callerPhoto', 'calleeId', 'calleeName', 'calleePhoto',
-                         'participantIds', 'targetType', 'targetId', 'channelName', 'callType', 'status',
+                         'participantIds', 'targetType', 'targetId', 'channelName', 'callType', 'status', 'videoQuality',
                          'callerMuted', 'calleeMuted', 'callerVideoOn', 'calleeVideoOn',
                          'createdAt', 'updatedAt'
                        ]) &&
@@ -550,19 +673,23 @@ service cloud.firestore {
                        isValidCallSession(incoming()) &&
                        (request.auth.uid in existing().participantIds) &&
                        incoming().callerId == existing().callerId &&
-                       incoming().participantIds == existing().participantIds &&
+                       incoming().participantIds.hasAll(existing().participantIds) &&
                        incoming().targetType == existing().targetType &&
                        incoming().targetId == existing().targetId &&
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
-                         'status', 'callType', 'callerMuted', 'calleeMuted', 'callerVideoOn', 'calleeVideoOn', 'updatedAt'
+                         'participantIds', 'status', 'callType', 'videoQuality',
+                         'callerMuted', 'calleeMuted', 'callerVideoOn', 'calleeVideoOn', 'updatedAt'
                        ]) &&
                        isValidTimestamp(incoming().updatedAt);
 
       allow delete: if isSignedIn() && isValidId(callId) && (request.auth.uid in existing().participantIds);
 
       match /streams/{senderId} {
-        allow get: if isSignedIn() && isValidId(senderId) && resource != null && (request.auth.uid in existing().participantIds);
+        allow get: if isSignedIn() && isValidId(senderId) && resource != null && (
+          (request.auth.uid in existing().participantIds) ||
+          (request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.participantIds)
+        );
         allow list: if isSignedIn() && (request.auth.uid in resource.data.participantIds);
 
         allow create: if isSignedIn() &&
@@ -575,7 +702,11 @@ service cloud.firestore {
                          (request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.participantIds) &&
                          incoming().participantIds == get(/databases/$(database)/documents/calls/$(callId)).data.participantIds &&
                          incoming().keys().hasAll(['callId', 'senderId', 'senderName', 'participantIds', 'audioLevel', 'videoEnabled', 'muted', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['callId', 'senderId', 'senderName', 'participantIds', 'frameData', 'audioLevel', 'videoEnabled', 'muted', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'callId', 'senderId', 'senderName', 'participantIds',
+                           'frameData', 'audioData', 'audioSeq', 'voiceEffect', 'faceFilter', 'videoQuality',
+                           'audioLevel', 'videoEnabled', 'muted', 'updatedAt'
+                         ]) &&
                          isValidCallStreamFrame(incoming());
 
         allow update: if isSignedIn() &&
@@ -584,14 +715,78 @@ service cloud.firestore {
                          existing().senderId == request.auth.uid &&
                          incoming().senderId == existing().senderId &&
                          incoming().callId == existing().callId &&
-                         incoming().participantIds == existing().participantIds &&
+                         (incoming().participantIds == existing().participantIds ||
+                          incoming().participantIds == get(/databases/$(database)/documents/calls/$(callId)).data.participantIds) &&
                          isValidCallStreamFrame(incoming()) &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
-                           'senderName', 'frameData', 'audioLevel', 'videoEnabled', 'muted', 'updatedAt'
+                           'senderName', 'participantIds', 'frameData', 'audioData', 'audioSeq',
+                           'voiceEffect', 'faceFilter', 'videoQuality',
+                           'audioLevel', 'videoEnabled', 'muted', 'updatedAt'
                          ]);
 
         allow delete: if isSignedIn() && isValidId(senderId) && (senderId == request.auth.uid || (request.auth.uid in existing().participantIds));
       }
+    }
+
+    // --- 9. Neo Plus Custom Quests ---
+    match /custom_quests/{questId} {
+      allow get, list: if isSignedIn();
+
+      allow create: if isSignedIn() &&
+                       isValidId(questId) &&
+                       incoming().creatorId == request.auth.uid &&
+                       isUserNeoPlus(request.auth.uid) &&
+                       incoming().keys().hasAll(['creatorId', 'creatorName', 'creatorRank', 'title', 'questType', 'targetCount', 'rewardPerStep', 'totalReward', 'createdAt']) &&
+                       incoming().keys().hasOnly([
+                         'creatorId', 'creatorName', 'creatorRank', 'title', 'description',
+                         'questType', 'targetCount', 'rewardPerStep', 'totalReward',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidCustomQuest(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(questId) &&
+                       existing().creatorId == request.auth.uid &&
+                       incoming().creatorId == existing().creatorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidCustomQuest(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'targetCount', 'rewardPerStep', 'totalReward', 'updatedAt']) &&
+                       isValidTimestamp(incoming().updatedAt);
+
+      allow delete: if isSignedIn() && isValidId(questId) && existing().creatorId == request.auth.uid;
+    }
+
+    // --- 10. Neo Plus Direct Developer Messages ---
+    match /dev_messages/{ticketId} {
+      allow get, list: if isSignedIn() && resource.data.senderId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+                       isValidId(ticketId) &&
+                       incoming().senderId == request.auth.uid &&
+                       isUserNeoPlus(request.auth.uid) &&
+                       incoming().keys().hasAll(['senderId', 'senderName', 'senderRank', 'subject', 'message', 'status', 'createdAt']) &&
+                       incoming().keys().hasOnly([
+                         'senderId', 'senderName', 'senderRank', 'subject', 'message', 'status', 'createdAt', 'updatedAt'
+                       ]) &&
+                       isValidDeveloperTicket(incoming());
+
+      allow update, delete: if false;
+    }
+
+    // --- 11. First-Owner Name Claim Lock (Single-Create Atomic Lock) ---
+    match /app_meta/{docId} {
+      allow get: if isSignedIn() && isValidId(docId);
+      allow list: if false;
+
+      allow create: if isSignedIn() &&
+                       isValidId(docId) &&
+                       docId == 'owner_name_reward' &&
+                       incoming().claimedBy == request.auth.uid &&
+                       incoming().keys().hasAll(['claimedBy', 'claimedAt']) &&
+                       incoming().keys().hasOnly(['claimedBy', 'claimedAt']) &&
+                       isValidTimestamp(incoming().claimedAt);
+
+      allow update, delete: if false;
     }
   }
 }
