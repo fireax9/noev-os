@@ -44,10 +44,14 @@ import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Group
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.ShoppingBag
 import androidx.compose.material.icons.rounded.Tag
@@ -90,12 +94,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.credentials.CredentialManager
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImage
-import com.example.R
 import com.example.data.model.CallSession
 import com.example.data.model.Conversation
+import com.example.data.model.CustomSticker
 import com.example.data.model.Friendship
 import com.example.data.model.Server
+import com.example.data.model.ServerEvent
 import com.example.data.model.UserPrivate
 import com.example.data.repository.CordlyRepository
 import com.example.ui.auth.signOut
@@ -142,7 +146,11 @@ fun CordlyHomeScreen(
     val viewedPublicProfileState by viewModel.viewedPublicProfile.collectAsStateWithLifecycle()
     val activeCalls by viewModel.activeCalls.collectAsStateWithLifecycle()
     val callStreams by viewModel.callStreams.collectAsStateWithLifecycle()
+    val incomingCallSignals by viewModel.incomingCallSignals.collectAsStateWithLifecycle()
     val joinedCallId by viewModel.joinedCallId.collectAsStateWithLifecycle()
+    val activeServerEvents by viewModel.activeServerEvents.collectAsStateWithLifecycle()
+    val userCustomStickers by viewModel.userCustomStickers.collectAsStateWithLifecycle()
+    val serverCustomStickers by viewModel.serverCustomStickers.collectAsStateWithLifecycle()
     val ultraDirectoryMembers by viewModel.ultraDirectoryMembers.collectAsStateWithLifecycle()
     val customQuests by viewModel.customQuests.collectAsStateWithLifecycle()
     val developerTickets by viewModel.developerTickets.collectAsStateWithLifecycle()
@@ -202,9 +210,8 @@ fun CordlyHomeScreen(
     var layoutPrefs by remember {
         mutableStateOf(AppAppearanceStore.loadLayoutPrefs(context))
     }
-    var currentLogoVariant by remember {
-        mutableStateOf(AppAppearanceStore.loadLogoVariant(context))
-    }
+    val currentLogoVariant = LocalAppLogoVariant.current
+    val onSelectLogoVariant = LocalOnAppLogoVariantSelected.current
     LaunchedEffect(context) {
         wallpaperState = AppAppearanceStore.loadAsync(context)
     }
@@ -214,6 +221,8 @@ fun CordlyHomeScreen(
     var showCreateServerDialog by remember { mutableStateOf(false) }
     var showJoinServerDialog by remember { mutableStateOf(false) }
     var showAddChannelForServer by remember { mutableStateOf<Server?>(null) }
+    var showEditServerDialogFor by remember { mutableStateOf<Server?>(null) }
+    var showCreateEventFor by remember { mutableStateOf<Server?>(null) }
     var settingsModalTab by remember { mutableStateOf<Int?>(null) }
     var showShopDialog by remember { mutableStateOf(false) }
     var showQuestsDialog by remember { mutableStateOf(false) }
@@ -334,6 +343,7 @@ fun CordlyHomeScreen(
                         friendshipsState = friendshipsState,
                         conversationsState = conversationsState,
                         servers = servers,
+                        serverEvents = activeServerEvents,
                         activeCalls = activeCalls,
                         onSetHomeTab = { viewModel.setHomeTab(it) },
                         onAddFriendClick = { showAddFriendDialog = true },
@@ -358,6 +368,10 @@ fun CordlyHomeScreen(
                         },
                         onOpenChannel = { srv, ch -> viewModel.openServerChannel(srv.id, ch) },
                         onAddChannelClick = { showAddChannelForServer = it },
+                        onDeleteChannel = { srv, ch -> viewModel.deleteChannel(srv, ch) },
+                        onEditServerClick = { showEditServerDialogFor = it },
+                        onCreateEventClick = { showCreateEventFor = it },
+                        onDeleteEvent = { srv, evId -> viewModel.deleteServerEvent(srv.id, evId) },
                         onUpdateServerIcon = { srv, url -> viewModel.updateServerIcon(srv, url) },
                         onKickMember = { srv, uid -> viewModel.removeMemberFromServer(srv, uid) },
                         onStartServerCall = { srv, ch, callType ->
@@ -388,6 +402,9 @@ fun CordlyHomeScreen(
                                 servers = servers,
                                 directMessagesState = directMessagesState,
                                 serverMessagesState = serverMessagesState,
+                                userCustomStickers = userCustomStickers,
+                                serverCustomStickers = serverCustomStickers,
+                                isStickerBusy = isBusy,
                                 onBack = { viewModel.closeActiveChat() },
                                 onSendDirect = { conv, text, reply, type, data, dur ->
                                     SoundEffectsManager.play(AppSoundEffect.MESSAGE_OUT)
@@ -402,6 +419,12 @@ fun CordlyHomeScreen(
                                 },
                                 onDeleteServer = { srvId, msgId, forEveryone ->
                                     viewModel.deleteServerMessage(srvId, msgId, forEveryone)
+                                },
+                                onCreateCustomSticker = { title, emoji, accentHex, imageData, serverId ->
+                                    viewModel.createCustomSticker(title, emoji, accentHex, imageData, serverId)
+                                },
+                                onDeleteCustomSticker = { stickerId, serverId ->
+                                    viewModel.deleteCustomSticker(stickerId, serverId)
                                 },
                                 onOpenUserProfile = { uid, name, photo ->
                                     viewModel.openProfileViewer(uid, name, photo, null)
@@ -431,6 +454,9 @@ fun CordlyHomeScreen(
                             servers = servers,
                             directMessagesState = directMessagesState,
                             serverMessagesState = serverMessagesState,
+                            userCustomStickers = userCustomStickers,
+                            serverCustomStickers = serverCustomStickers,
+                            isStickerBusy = isBusy,
                             onBack = { viewModel.closeActiveChat() },
                             onSendDirect = { conv, text, reply, type, data, dur ->
                                 SoundEffectsManager.play(AppSoundEffect.MESSAGE_OUT)
@@ -445,6 +471,12 @@ fun CordlyHomeScreen(
                             },
                             onDeleteServer = { srvId, msgId, forEveryone ->
                                 viewModel.deleteServerMessage(srvId, msgId, forEveryone)
+                            },
+                            onCreateCustomSticker = { title, emoji, accentHex, imageData, serverId ->
+                                viewModel.createCustomSticker(title, emoji, accentHex, imageData, serverId)
+                            },
+                            onDeleteCustomSticker = { stickerId, serverId ->
+                                viewModel.deleteCustomSticker(stickerId, serverId)
                             },
                             onOpenUserProfile = { uid, name, photo ->
                                 viewModel.openProfileViewer(uid, name, photo, null)
@@ -601,6 +633,33 @@ fun CordlyHomeScreen(
         )
     }
 
+    val targetServerForEdit = showEditServerDialogFor
+    if (targetServerForEdit != null) {
+        EditServerDialog(
+            server = targetServerForEdit,
+            isBusy = isBusy,
+            onSave = { name, desc, emoji, accentHex, iconUrl ->
+                viewModel.updateServerSettings(targetServerForEdit, name, desc, emoji, accentHex, iconUrl) {
+                    showEditServerDialogFor = null
+                }
+            },
+            onDismiss = { showEditServerDialogFor = null }
+        )
+    }
+
+    val targetServerForEvent = showCreateEventFor
+    if (targetServerForEvent != null) {
+        CreateServerEventDialog(
+            isBusy = isBusy,
+            onCreate = { title, desc, schedule ->
+                viewModel.createServerEvent(targetServerForEvent, title, desc, schedule) {
+                    showCreateEventFor = null
+                }
+            },
+            onDismiss = { showCreateEventFor = null }
+        )
+    }
+
     // Isolated Settings & Languages Modal (NO Shop here)
     val modalTab = settingsModalTab
     if (modalTab != null) {
@@ -634,7 +693,7 @@ fun CordlyHomeScreen(
                 viewModel.updateAvatarVideo(dataUri)
             },
             onUpdateAppLogo = { variant ->
-                currentLogoVariant = AppAppearanceStore.applyAppLogoVariant(context, variant)
+                onSelectLogoVariant(variant)
                 viewModel.showMessage("Launcher icon updated: ${variant.titleEn}")
             },
             onUpdateLayoutPrefs = { nextPrefs ->
@@ -737,7 +796,22 @@ fun CordlyHomeScreen(
             currentUserId = viewModel.currentUserId,
             currentUserRank = effectiveRank,
             streams = callStreams,
+            incomingSignals = incomingCallSignals,
             inviteableFriends = inviteableFriends,
+            onSendSignal = { recipientId, type, sdp, candidate, sdpMid, sdpMLineIndex ->
+                viewModel.sendCallSignal(
+                    call = joinedCall,
+                    recipientId = recipientId,
+                    type = type,
+                    sdp = sdp,
+                    candidate = candidate,
+                    sdpMid = sdpMid,
+                    sdpMLineIndex = sdpMLineIndex
+                )
+            },
+            onConsumeSignal = { sigId ->
+                viewModel.deleteCallSignal(joinedCall.id, sigId)
+            },
             onToggleMute = { muted ->
                 viewModel.updateCallMediaState(joinedCall, muted = muted, videoOn = joinedCall.callType == "video")
             },
@@ -853,6 +927,7 @@ private fun WorkspaceSidebar(
     friendshipsState: UiState<List<Friendship>>,
     conversationsState: UiState<List<Conversation>>,
     servers: List<Server>,
+    serverEvents: List<ServerEvent>,
     activeCalls: List<CallSession>,
     onSetHomeTab: (Int) -> Unit,
     onAddFriendClick: () -> Unit,
@@ -865,6 +940,10 @@ private fun WorkspaceSidebar(
     onOpenUserProfile: (uid: String, name: String, photo: String?, onMessage: (() -> Unit)?) -> Unit,
     onOpenChannel: (Server, String) -> Unit,
     onAddChannelClick: (Server) -> Unit,
+    onDeleteChannel: (Server, String) -> Unit,
+    onEditServerClick: (Server) -> Unit,
+    onCreateEventClick: (Server) -> Unit,
+    onDeleteEvent: (Server, String) -> Unit,
     onUpdateServerIcon: (Server, String) -> Unit,
     onKickMember: (Server, String) -> Unit,
     onStartServerCall: (Server, String, String) -> Unit,
@@ -912,6 +991,7 @@ private fun WorkspaceSidebar(
                             currentUserId = currentUserId,
                             isNeoPlus = effectiveRank == CordlyRepository.RANK_NEO_PLUS,
                             friendships = (friendshipsState as? UiState.Success)?.data.orEmpty(),
+                            serverEvents = serverEvents,
                             selectedChannel = destination.channelName,
                             activeServerCall = activeCalls.firstOrNull {
                                 it.targetType == "server" && it.targetId == server.id
@@ -919,6 +999,10 @@ private fun WorkspaceSidebar(
                             onCopyInvite = onCopyCode,
                             onOpenChannel = { ch -> onOpenChannel(server, ch) },
                             onAddChannelClick = { onAddChannelClick(server) },
+                            onDeleteChannel = { ch -> onDeleteChannel(server, ch) },
+                            onEditServerClick = { onEditServerClick(server) },
+                            onCreateEventClick = { onCreateEventClick(server) },
+                            onDeleteEvent = { evId -> onDeleteEvent(server, evId) },
                             onUpdateServerIcon = { url -> onUpdateServerIcon(server, url) },
                             onKickMember = { memberUid -> onKickMember(server, memberUid) },
                             onStartVoiceCall = {
@@ -998,19 +1082,11 @@ private fun HomeHubContent(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
             ) {
-                Surface(
-                    color = Color(0xFF5865F2),
-                    shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.28f)),
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    AsyncImage(
-                        model = R.drawable.neov_icon_fg,
-                        contentDescription = "neov chat emblem",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                NeovBrandEmblem(
+                    variant = LocalAppLogoVariant.current,
+                    size = 32.dp,
+                    cornerRadius = 10.dp
+                )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "neov chat",
@@ -1574,11 +1650,16 @@ private fun ServerChannelsContent(
     currentUserId: String,
     isNeoPlus: Boolean,
     friendships: List<Friendship>,
+    serverEvents: List<ServerEvent>,
     selectedChannel: String,
     activeServerCall: CallSession?,
     onCopyInvite: (String) -> Unit,
     onOpenChannel: (String) -> Unit,
     onAddChannelClick: () -> Unit,
+    onDeleteChannel: (String) -> Unit,
+    onEditServerClick: () -> Unit,
+    onCreateEventClick: () -> Unit,
+    onDeleteEvent: (String) -> Unit,
     onUpdateServerIcon: (String) -> Unit,
     onKickMember: (String) -> Unit,
     onStartVoiceCall: () -> Unit,
@@ -1591,6 +1672,7 @@ private fun ServerChannelsContent(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val isOwner = server.ownerId == currentUserId
+    val canManageServer = isOwner || isNeoPlus
     var showMembersManage by remember(server.id) { mutableStateOf(false) }
     val accent = parseHexColor(server.accentHex)
     var isUpdatingPhoto by remember(server.id) { mutableStateOf(false) }
@@ -1637,7 +1719,7 @@ private fun ServerChannelsContent(
                     Box(
                         modifier = Modifier
                             .then(
-                                if (isOwner && !isUpdatingPhoto) {
+                                if (canManageServer && !isUpdatingPhoto) {
                                     Modifier.clickable {
                                         serverPhotoPicker.launch(
                                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -1657,7 +1739,7 @@ private fun ServerChannelsContent(
                             size = 48.dp,
                             cornerRadius = 14.dp
                         )
-                        if (isOwner) {
+                        if (canManageServer) {
                             Surface(
                                 color = CordlyBlurple,
                                 shape = CircleShape,
@@ -1698,12 +1780,26 @@ private fun ServerChannelsContent(
                         Text(
                             text = when {
                                 isUpdatingPhoto -> "Updating server image..."
-                                isOwner -> "${server.memberUids.size} member(s) • Tap icon to change photo"
+                                canManageServer -> "${server.memberUids.size} member(s) • Full Control"
                                 else -> "${server.memberUids.size} member(s)"
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = CordlyTextSecondary
                         )
+                    }
+                    if (canManageServer) {
+                        IconButton(
+                            onClick = onEditServerClick,
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .testTag("edit_server_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Settings,
+                                contentDescription = strings.editServerTitle,
+                                tint = if (isNeoPlus && !isOwner) CordlyAmber else CordlyCyan
+                            )
+                        }
                     }
                     if (!isOwner) {
                         IconButton(onClick = onLeaveServer, modifier = Modifier.minimumInteractiveComponentSize()) {
@@ -1868,34 +1964,36 @@ private fun ServerChannelsContent(
 
         HorizontalDivider(color = CordlyDivider, thickness = 1.dp)
 
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            Text(
-                text = strings.textChannelsHeader,
-                style = MaterialTheme.typography.labelSmall,
-                color = CordlyTextSecondary
-            )
-            if (isOwner) {
-                IconButton(
-                    onClick = onAddChannelClick,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(Icons.Rounded.Add, contentDescription = strings.createChannelTitle, tint = CordlyTextPrimary)
-                }
-            }
-        }
-
         LazyColumn(
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             modifier = Modifier.weight(1f)
         ) {
-            items(server.channels, key = { it }) { channel ->
+            item(key = "channels_header") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = strings.textChannelsHeader,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CordlyTextSecondary
+                    )
+                    if (canManageServer) {
+                        IconButton(
+                            onClick = onAddChannelClick,
+                            modifier = Modifier.size(34.dp).testTag("add_channel_button")
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = strings.createChannelTitle, tint = CordlyTextPrimary)
+                        }
+                    }
+                }
+            }
+
+            items(server.channels, key = { "ch_$it" }) { channel ->
                 val isSelected = channel == selectedChannel
                 Surface(
                     color = if (isSelected) CordlyElevatedSurface else Color.Transparent,
@@ -1908,7 +2006,7 @@ private fun ServerChannelsContent(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Tag,
@@ -1920,15 +2018,140 @@ private fun ServerChannelsContent(
                         Text(
                             text = channel,
                             style = MaterialTheme.typography.titleMedium,
-                            color = if (isSelected) CordlyTextPrimary else CordlyTextSecondary
+                            color = if (isSelected) CordlyTextPrimary else CordlyTextSecondary,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
+                        if (canManageServer && server.channels.size > 1) {
+                            IconButton(
+                                onClick = { onDeleteChannel(channel) },
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .testTag("delete_channel_$channel")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DeleteOutline,
+                                    contentDescription = "Delete $channel",
+                                    tint = CordlyTextMuted,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Discord-style Server Events section
+            item(key = "events_header") {
+                HorizontalDivider(color = CordlyDivider, thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Rounded.Event, contentDescription = null, tint = CordlyCyan, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "${strings.serverEventsHeader} (${serverEvents.size})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CordlyCyan
+                        )
+                    }
+                    if (canManageServer) {
+                        Surface(
+                            color = CordlyBlurple.copy(alpha = 0.22f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, CordlyBlurple),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable(onClick = onCreateEventClick)
+                                .testTag("create_server_event_button")
+                        ) {
+                            Text(
+                                text = strings.createEventButton,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (serverEvents.isEmpty()) {
+                item(key = "no_events_hint") {
+                    Text(
+                        text = strings.noEventsYet,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CordlyTextMuted,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            } else {
+                items(serverEvents, key = { "ev_${it.id}" }) { ev ->
+                    Surface(
+                        color = CordlyCardSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, CordlyCyan.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("server_event_${ev.id}")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = ev.title,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = CordlyTextPrimary,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "🕒 ${ev.scheduledLabel} • ${ev.creatorName}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = CordlyCyan,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (!ev.description.isNullOrBlank()) {
+                                    Text(
+                                        text = ev.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = CordlyTextSecondary,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            if (canManageServer) {
+                                IconButton(
+                                    onClick = { onDeleteEvent(ev.id) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.DeleteOutline,
+                                        contentDescription = "Delete event",
+                                        tint = CordlyCrimson,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Neo Plus Server Member Kick Management for Server Owners
-        if (isOwner && isNeoPlus && server.memberUids.size > 1) {
+        // Neo Plus Full Server Member Management (Owner OR Neo+ Member)
+        if (canManageServer && isNeoPlus && server.memberUids.size > 1) {
             HorizontalDivider(color = CordlyDivider, thickness = 1.dp)
             Column(
                 modifier = Modifier
@@ -1965,6 +2188,7 @@ private fun ServerChannelsContent(
                                 it.requesterId == memberUid || it.recipientId == memberUid
                             }
                             val displayName = when {
+                                memberUid == currentUserId -> "You"
                                 friendMatch == null -> "Member ${memberUid.take(6)}"
                                 friendMatch.requesterId == memberUid -> friendMatch.requesterName
                                 else -> friendMatch.recipientName
@@ -1986,18 +2210,20 @@ private fun ServerChannelsContent(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    IconButton(
-                                        onClick = { onKickMember(memberUid) },
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .testTag("kick_member_$memberUid")
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.PersonRemove,
-                                            contentDescription = "Kick $displayName",
-                                            tint = CordlyCrimson,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                    if (memberUid != currentUserId) {
+                                        IconButton(
+                                            onClick = { onKickMember(memberUid) },
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .testTag("kick_member_$memberUid")
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.PersonRemove,
+                                                contentDescription = "Kick $displayName",
+                                                tint = CordlyCrimson,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -2021,6 +2247,9 @@ private fun ActiveChatPane(
     servers: List<Server>,
     directMessagesState: UiState<List<com.example.data.model.DirectMessage>>,
     serverMessagesState: UiState<List<com.example.data.model.ServerMessage>>,
+    userCustomStickers: List<CustomSticker>,
+    serverCustomStickers: List<CustomSticker>,
+    isStickerBusy: Boolean,
     onBack: () -> Unit,
     onSendDirect: (
         conv: Conversation,
@@ -2041,12 +2270,21 @@ private fun ActiveChatPane(
         mediaDurationMs: Long?
     ) -> Unit,
     onDeleteServer: (String, String, Boolean) -> Unit,
+    onCreateCustomSticker: (
+        title: String,
+        emoji: String,
+        accentHex: String,
+        imageData: String?,
+        serverId: String?
+    ) -> Unit,
+    onDeleteCustomSticker: (stickerId: String, serverId: String?) -> Unit,
     onOpenUserProfile: (userId: String, name: String, photoUrl: String?) -> Unit,
     onStartDirectCall: (calleeId: String, calleeName: String, calleePhoto: String?, convId: String, callType: String) -> Unit,
     onStartServerCall: (server: Server, channelName: String, callType: String) -> Unit,
     onStatusToast: (String) -> Unit
 ) {
     val strings = LocalAppStrings.current
+    val isNeoPlus = currentUserRank == CordlyRepository.RANK_NEO_PLUS
     when (activeChat) {
         is ActiveChatTarget.DirectChat -> {
             val conv = conversations.firstOrNull { it.id == activeChat.conversationId }
@@ -2098,6 +2336,9 @@ private fun ActiveChatPane(
                 currentUserRank = currentUserRank,
                 compactCards = compactCards,
                 messagesState = mappedMessages,
+                customStickers = userCustomStickers,
+                canShareServerStickers = false,
+                isStickerBusy = isStickerBusy,
                 hasWallpaper = hasWallpaper,
                 onBack = onBack,
                 onSendMessage = { text, reply, type, data, dur ->
@@ -2105,6 +2346,12 @@ private fun ActiveChatPane(
                 },
                 onDeleteMessage = { msgId, forEveryone ->
                     onDeleteDirect(activeChat.conversationId, msgId, forEveryone)
+                },
+                onCreateCustomSticker = { title, emoji, accentHex, imageData, _ ->
+                    onCreateCustomSticker(title, emoji, accentHex, imageData, null)
+                },
+                onDeleteCustomSticker = { sticker ->
+                    onDeleteCustomSticker(sticker.id, null)
                 },
                 onUserProfileClick = onOpenUserProfile,
                 onHeaderProfileClick = if (peerId.isNotBlank()) {
@@ -2127,6 +2374,10 @@ private fun ActiveChatPane(
         }
         is ActiveChatTarget.ServerChannel -> {
             val server = servers.firstOrNull { it.id == activeChat.serverId }
+            val combinedStickers = remember(serverCustomStickers, userCustomStickers) {
+                (serverCustomStickers + userCustomStickers).distinctBy { "${it.scopeId.orEmpty()}:${it.id}" }
+            }
+            val canManageServerStickers = (server?.ownerId == currentUserId || isNeoPlus)
             val mappedMessages: UiState<List<ChatMessageItem>> = when (serverMessagesState) {
                 is UiState.Loading -> UiState.Loading
                 is UiState.Error -> UiState.Error(serverMessagesState.message)
@@ -2159,6 +2410,9 @@ private fun ActiveChatPane(
                 currentUserRank = currentUserRank,
                 compactCards = compactCards,
                 messagesState = mappedMessages,
+                customStickers = combinedStickers,
+                canShareServerStickers = canManageServerStickers,
+                isStickerBusy = isStickerBusy,
                 hasWallpaper = hasWallpaper,
                 onBack = onBack,
                 onSendMessage = { text, reply, type, data, dur ->
@@ -2166,6 +2420,14 @@ private fun ActiveChatPane(
                 },
                 onDeleteMessage = { msgId, forEveryone ->
                     onDeleteServer(activeChat.serverId, msgId, forEveryone)
+                },
+                onCreateCustomSticker = { title, emoji, accentHex, imageData, shareToServer ->
+                    val targetServerId = if (shareToServer && canManageServerStickers) activeChat.serverId else null
+                    onCreateCustomSticker(title, emoji, accentHex, imageData, targetServerId)
+                },
+                onDeleteCustomSticker = { sticker ->
+                    val targetServerId = sticker.scopeId?.takeIf { it.isNotBlank() }
+                    onDeleteCustomSticker(sticker.id, targetServerId)
                 },
                 onUserProfileClick = onOpenUserProfile,
                 onStartVoiceCall = if (server != null) {

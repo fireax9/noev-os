@@ -20,15 +20,21 @@ enum class VideoQualityPreset(
     val label: String,
     val maxLongEdgePx: Int,
     val initialJpegQuality: Int,
-    val isHdTier: Boolean
+    val isHdTier: Boolean,
+    val captureWidth: Int,
+    val captureHeight: Int,
+    val captureFps: Int,
+    val maxBitrateBps: Int,
+    val requiredRank: String = "normal"
 ) {
-    Q144P("144p", "144p", 192, 46, false),
-    Q240P("240p", "240p", 260, 50, false),
-    Q360P("360p", "360p", 380, 55, false),
-    Q480P("480p", "480p", 520, 62, false),
-    Q720P("720p", "720p HD", 760, 68, true),
-    Q1080P("1080p", "1080p FHD", 1080, 74, true),
-    Q4K("4K", "4K Ultra HD", 1440, 80, true);
+    Q144P("144p", "144p", 192, 46, false, 256, 144, 15, 200_000),
+    Q240P("240p", "240p", 260, 50, false, 426, 240, 20, 380_000),
+    Q360P("360p", "360p", 380, 55, false, 640, 360, 24, 650_000),
+    Q480P("480p", "480p", 520, 62, false, 854, 480, 30, 1_100_000),
+    Q720P("720p", "720p HD", 760, 68, true, 1280, 720, 30, 2_200_000),
+    Q1080P("1080p", "1080p FHD", 1080, 74, true, 1920, 1080, 30, 4_500_000),
+    Q4K("4K", "4K Ultra HD", 1440, 80, true, 3840, 2160, 30, 10_000_000),
+    Q8K("8K", "8K Neo+ Max", 2160, 88, true, 3840, 2160, 60, 18_000_000, requiredRank = "neo_plus");
 
     companion object {
         fun fromId(id: String?): VideoQualityPreset {

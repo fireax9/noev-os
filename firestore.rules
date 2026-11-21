@@ -232,7 +232,7 @@ service cloud.firestore {
     }
 
     function isValidVideoQuality(q) {
-      return q in ['144p', '240p', '360p', '480p', '720p', '1080p', '4K'];
+      return q in ['144p', '240p', '360p', '480p', '720p', '1080p', '4K', '8K'];
     }
 
     function isValidCallSession(data) {
@@ -307,6 +307,53 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(uid)).data.rank == 'neo_plus';
     }
 
+    function isServerMember(serverId) {
+      return exists(/databases/$(database)/documents/servers/$(serverId)) &&
+             (request.auth.uid in get(/databases/$(database)/documents/servers/$(serverId)).data.memberUids);
+    }
+
+    function canManageServer(serverId) {
+      return isServerMember(serverId) &&
+             (get(/databases/$(database)/documents/servers/$(serverId)).data.ownerId == request.auth.uid ||
+              isUserNeoPlus(request.auth.uid));
+    }
+
+    function isValidCallSignal(data) {
+      return isValidId(data.callId) &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.recipientId is string && data.recipientId.size() >= 1 && data.recipientId.size() <= 128 &&
+             data.participantIds is list && data.participantIds.size() >= 1 && data.participantIds.size() <= 25 &&
+             (data.senderId in data.participantIds) &&
+             (data.recipientId in data.participantIds) &&
+             data.type in ['offer', 'answer', 'ice'] &&
+             (!('sdp' in data) || data.sdp == null || (data.sdp is string && data.sdp.size() <= 30000)) &&
+             (!('candidate' in data) || data.candidate == null || (data.candidate is string && data.candidate.size() <= 2048)) &&
+             (!('sdpMid' in data) || data.sdpMid == null || (data.sdpMid is string && data.sdpMid.size() <= 64)) &&
+             (!('sdpMLineIndex' in data) || data.sdpMLineIndex == null || (data.sdpMLineIndex is int && data.sdpMLineIndex >= 0 && data.sdpMLineIndex <= 32)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidServerEvent(data) {
+      return isValidId(data.serverId) &&
+             data.creatorId is string && data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             data.creatorName is string && data.creatorName.size() >= 1 && data.creatorName.size() <= 60 &&
+             data.title is string && data.title.size() >= 2 && data.title.size() <= 80 &&
+             (!('description' in data) || data.description == null || (data.description is string && data.description.size() <= 300)) &&
+             data.scheduledLabel is string && data.scheduledLabel.size() >= 1 && data.scheduledLabel.size() <= 60 &&
+             isValidTimestamp(data.createdAt) &&
+             (!('updatedAt' in data) || data.updatedAt == null || isValidTimestamp(data.updatedAt));
+    }
+
+    function isValidCustomSticker(data) {
+      return data.creatorId is string && data.creatorId.size() >= 1 && data.creatorId.size() <= 128 &&
+             (!('scopeId' in data) || data.scopeId == null || isValidId(data.scopeId)) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 40 &&
+             data.emoji is string && data.emoji.size() >= 1 && data.emoji.size() <= 16 &&
+             data.accentHex is string && data.accentHex.size() >= 4 && data.accentHex.size() <= 10 &&
+             (!('imageData' in data) || data.imageData == null || isValidMediaString(data.imageData)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
     // --- 1. Private User Profile (Owner-Only PII) ---
     match /users/{userId} {
       allow get, list: if isSignedIn() && request.auth.uid == userId;
@@ -345,6 +392,23 @@ service cloud.firestore {
                        isValidTimestamp(incoming().updatedAt);
 
       allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+      match /custom_stickers/{stickerId} {
+        allow get, list: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(userId) &&
+                         isValidId(stickerId) &&
+                         request.auth.uid == userId &&
+                         incoming().creatorId == request.auth.uid &&
+                         incoming().keys().hasAll(['creatorId', 'title', 'emoji', 'accentHex', 'createdAt']) &&
+                         incoming().keys().hasOnly(['creatorId', 'scopeId', 'title', 'emoji', 'accentHex', 'imageData', 'createdAt']) &&
+                         isValidCustomSticker(incoming());
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() && isValidId(userId) && isValidId(stickerId) && request.auth.uid == userId;
+      }
     }
 
     // --- 2. Public Profile Cards (Non-PII) ---
@@ -620,6 +684,51 @@ service cloud.firestore {
                           get(/databases/$(database)/documents/servers/$(serverId)).data.ownerId == request.auth.uid ||
                           ((request.auth.uid in existing().memberUids) && isUserNeoPlus(request.auth.uid)));
       }
+
+      match /events/{eventId} {
+        allow get, list: if isSignedIn() && isValidId(serverId) && isServerMember(serverId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(serverId) &&
+                         isValidId(eventId) &&
+                         incoming().serverId == serverId &&
+                         incoming().creatorId == request.auth.uid &&
+                         canManageServer(serverId) &&
+                         incoming().keys().hasAll(['serverId', 'creatorId', 'creatorName', 'title', 'scheduledLabel', 'createdAt']) &&
+                         incoming().keys().hasOnly(['serverId', 'creatorId', 'creatorName', 'title', 'description', 'scheduledLabel', 'createdAt', 'updatedAt']) &&
+                         isValidServerEvent(incoming());
+
+        allow update: if isSignedIn() &&
+                         isValidId(serverId) &&
+                         isValidId(eventId) &&
+                         canManageServer(serverId) &&
+                         isValidServerEvent(incoming()) &&
+                         incoming().serverId == existing().serverId &&
+                         incoming().creatorId == existing().creatorId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'scheduledLabel', 'updatedAt']) &&
+                         isValidTimestamp(incoming().updatedAt);
+
+        allow delete: if isSignedIn() && isValidId(serverId) && isValidId(eventId) && canManageServer(serverId);
+      }
+
+      match /custom_stickers/{stickerId} {
+        allow get, list: if isSignedIn() && isValidId(serverId) && isServerMember(serverId);
+
+        allow create: if isSignedIn() &&
+                         isValidId(serverId) &&
+                         isValidId(stickerId) &&
+                         incoming().creatorId == request.auth.uid &&
+                         canManageServer(serverId) &&
+                         incoming().keys().hasAll(['creatorId', 'title', 'emoji', 'accentHex', 'createdAt']) &&
+                         incoming().keys().hasOnly(['creatorId', 'scopeId', 'title', 'emoji', 'accentHex', 'imageData', 'createdAt']) &&
+                         isValidCustomSticker(incoming());
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() && isValidId(serverId) && isValidId(stickerId) &&
+                         (existing().creatorId == request.auth.uid || canManageServer(serverId));
+      }
     }
 
     // --- 7. Server Invite Codes & Name Lookups ---
@@ -725,6 +834,33 @@ service cloud.firestore {
                          ]);
 
         allow delete: if isSignedIn() && isValidId(senderId) && (senderId == request.auth.uid || (request.auth.uid in existing().participantIds));
+      }
+
+      match /signals/{signalId} {
+        allow get: if isSignedIn() && isValidId(signalId) && resource != null &&
+                      (resource.data.senderId == request.auth.uid || resource.data.recipientId == request.auth.uid) &&
+                      exists(/databases/$(database)/documents/calls/$(callId)) &&
+                      (request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.participantIds);
+        allow list: if isSignedIn() &&
+                      (resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid) &&
+                      exists(/databases/$(database)/documents/calls/$(callId)) &&
+                      (request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.participantIds);
+
+        allow create: if isSignedIn() &&
+                         isValidId(signalId) &&
+                         incoming().callId == callId &&
+                         incoming().senderId == request.auth.uid &&
+                         exists(/databases/$(database)/documents/calls/$(callId)) &&
+                         (request.auth.uid in get(/databases/$(database)/documents/calls/$(callId)).data.participantIds) &&
+                         (incoming().recipientId in get(/databases/$(database)/documents/calls/$(callId)).data.participantIds) &&
+                         incoming().keys().hasAll(['callId', 'senderId', 'recipientId', 'participantIds', 'type', 'createdAt']) &&
+                         incoming().keys().hasOnly(['callId', 'senderId', 'recipientId', 'participantIds', 'type', 'sdp', 'candidate', 'sdpMid', 'sdpMLineIndex', 'createdAt']) &&
+                         isValidCallSignal(incoming());
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() && isValidId(signalId) &&
+                         (existing().senderId == request.auth.uid || existing().recipientId == request.auth.uid);
       }
     }
 

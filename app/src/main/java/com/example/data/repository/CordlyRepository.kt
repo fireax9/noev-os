@@ -5,15 +5,18 @@ import com.example.R
 import com.example.data.OperationType
 import com.example.data.handleFirestoreError
 import com.example.data.model.CallSession
+import com.example.data.model.CallSignal
 import com.example.data.model.CallStreamFrame
 import com.example.data.model.Conversation
 import com.example.data.model.CustomQuest
+import com.example.data.model.CustomSticker
 import com.example.data.model.DeveloperTicket
 import com.example.data.model.DirectMessage
 import com.example.data.model.Friendship
 import com.example.data.model.LookupKey
 import com.example.data.model.PublicProfile
 import com.example.data.model.Server
+import com.example.data.model.ServerEvent
 import com.example.data.model.ServerInvite
 import com.example.data.model.ServerMessage
 import com.example.data.model.UserPrivate
@@ -1706,6 +1709,255 @@ class CordlyRepository(
         }
     }
 
+    suspend fun deleteChannelFromServer(server: Server, channelName: String): Result<Unit> {
+        requireUserId()
+        require(server.channels.size > 1) { "A server must keep at least 1 text channel." }
+        val updated = server.channels.filter { it != channelName }
+        require(updated.isNotEmpty()) { "A server must keep at least 1 text channel." }
+        val serverRef = db.collection("servers").document(server.id)
+        return try {
+            serverRef.update(
+                mapOf(
+                    "channels" to updated,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            ).await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, serverRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateServerSettings(
+        server: Server,
+        name: String,
+        description: String?,
+        iconEmoji: String,
+        accentHex: String,
+        iconUrl: String?,
+        isNeoPlusMember: Boolean
+    ): Result<Unit> {
+        val uid = requireUserId()
+        require(server.ownerId == uid || isNeoPlusMember) { "Only the server owner or Neo+ can edit server settings." }
+        val cleanName = name.trim().take(50)
+        require(cleanName.length >= 2) { "Server name must be at least 2 characters." }
+        val cleanEmoji = iconEmoji.trim().take(16).ifBlank { server.iconEmoji }
+        val cleanDesc = description?.trim()?.take(200)?.takeIf { it.isNotBlank() }
+        val cleanAccent = accentHex.trim().take(10).ifBlank { "#5865F2" }
+        val cleanUrl = iconUrl?.take(120000)?.takeIf { it.isNotBlank() }
+
+        val serverRef = db.collection("servers").document(server.id)
+        return try {
+            val payload = mutableMapOf<String, Any>(
+                "name" to cleanName,
+                "iconEmoji" to cleanEmoji,
+                "accentHex" to cleanAccent,
+                "updatedAt" to FieldValue.serverTimestamp()
+            )
+            if (cleanDesc != null) payload["description"] = cleanDesc else payload["description"] = FieldValue.delete()
+            if (cleanUrl != null) payload["iconUrl"] = cleanUrl else payload["iconUrl"] = FieldValue.delete()
+            serverRef.update(payload).await()
+
+            if (server.ownerId == uid) {
+                val inviteUpdate = mutableMapOf<String, Any>(
+                    "serverName" to cleanName,
+                    "iconEmoji" to cleanEmoji,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                if (cleanUrl != null) inviteUpdate["iconUrl"] = cleanUrl else inviteUpdate["iconUrl"] = FieldValue.delete()
+                db.collection("server_invites").document(server.inviteCode).update(inviteUpdate).await()
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, serverRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    fun observeServerEvents(serverId: String, uid: String): Flow<List<ServerEvent>> = flow {
+        val path = "servers/$serverId/events"
+        emitAll(
+            db.collection("servers").document(serverId).collection("events")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(ServerEvent::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, uid)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun createServerEvent(
+        server: Server,
+        creator: UserPrivate,
+        title: String,
+        description: String?,
+        scheduledLabel: String
+    ): Result<ServerEvent> {
+        val uid = requireUserId()
+        val isNeoPlus = effectiveRank(creator) == RANK_NEO_PLUS
+        require(server.ownerId == uid || isNeoPlus) { "Only the server owner or Neo+ can create events." }
+        val cleanTitle = title.trim().take(80)
+        require(cleanTitle.length >= 2) { "Event title must be at least 2 characters." }
+        val cleanSchedule = scheduledLabel.trim().take(60).ifBlank { "Soon" }
+        val cleanDesc = description?.trim()?.take(300)?.takeIf { it.isNotBlank() }
+
+        val eventRef = db.collection("servers").document(server.id).collection("events").document()
+        return try {
+            val payload = buildMap<String, Any> {
+                put("serverId", server.id)
+                put("creatorId", uid)
+                put("creatorName", creator.displayName.take(60).ifBlank { "Member" })
+                put("title", cleanTitle)
+                if (cleanDesc != null) put("description", cleanDesc)
+                put("scheduledLabel", cleanSchedule)
+                put("createdAt", FieldValue.serverTimestamp())
+                put("updatedAt", FieldValue.serverTimestamp())
+            }
+            eventRef.set(payload).await()
+            Result.success(
+                ServerEvent(
+                    id = eventRef.id,
+                    serverId = server.id,
+                    creatorId = uid,
+                    creatorName = creator.displayName,
+                    title = cleanTitle,
+                    description = cleanDesc,
+                    scheduledLabel = cleanSchedule,
+                    createdAt = Timestamp.now(),
+                    updatedAt = Timestamp.now()
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, eventRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteServerEvent(serverId: String, eventId: String): Result<Unit> {
+        requireUserId()
+        val ref = db.collection("servers").document(serverId).collection("events").document(eventId)
+        return try {
+            ref.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, ref.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    fun observeUserCustomStickers(uid: String): Flow<List<CustomSticker>> = flow {
+        val path = "users/$uid/custom_stickers"
+        emitAll(
+            db.collection("users").document(uid).collection("custom_stickers")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CustomSticker::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, uid)
+                    throw error
+                }
+        )
+    }
+
+    fun observeServerCustomStickers(serverId: String, uid: String): Flow<List<CustomSticker>> = flow {
+        val path = "servers/$serverId/custom_stickers"
+        emitAll(
+            db.collection("servers").document(serverId).collection("custom_stickers")
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CustomSticker::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedByDescending { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, uid)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun createCustomSticker(
+        title: String,
+        emoji: String,
+        accentHex: String,
+        imageData: String?,
+        serverId: String? = null
+    ): Result<CustomSticker> {
+        val uid = requireUserId()
+        val cleanTitle = title.trim().take(40).ifBlank { "Sticker" }
+        val cleanEmoji = emoji.trim().take(16).ifBlank { "✨" }
+        val cleanAccent = accentHex.trim().take(10).ifBlank { "#5865F2" }
+        val cleanImg = imageData?.take(118_000)?.takeIf { it.isNotBlank() }
+
+        val targetCol = if (!serverId.isNullOrBlank()) {
+            db.collection("servers").document(serverId).collection("custom_stickers")
+        } else {
+            db.collection("users").document(uid).collection("custom_stickers")
+        }
+        val docRef = targetCol.document()
+        return try {
+            val payload = buildMap<String, Any> {
+                put("creatorId", uid)
+                if (!serverId.isNullOrBlank()) put("scopeId", serverId)
+                put("title", cleanTitle)
+                put("emoji", cleanEmoji)
+                put("accentHex", cleanAccent)
+                if (cleanImg != null) put("imageData", cleanImg)
+                put("createdAt", FieldValue.serverTimestamp())
+            }
+            docRef.set(payload).await()
+            Result.success(
+                CustomSticker(
+                    id = docRef.id,
+                    creatorId = uid,
+                    scopeId = serverId,
+                    title = cleanTitle,
+                    emoji = cleanEmoji,
+                    accentHex = cleanAccent,
+                    imageData = cleanImg,
+                    createdAt = Timestamp.now()
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, docRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteCustomSticker(stickerId: String, serverId: String? = null): Result<Unit> {
+        val uid = requireUserId()
+        val docRef = if (!serverId.isNullOrBlank()) {
+            db.collection("servers").document(serverId).collection("custom_stickers").document(stickerId)
+        } else {
+            db.collection("users").document(uid).collection("custom_stickers").document(stickerId)
+        }
+        return try {
+            docRef.delete().await()
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path, auth)
+            Result.failure(e)
+        }
+    }
+
     suspend fun removeMemberFromServer(server: Server, targetUid: String): Result<Unit> {
         val uid = requireUserId()
         require(targetUid != server.ownerId) { "Cannot remove the server owner." }
@@ -2117,6 +2369,64 @@ class CordlyRepository(
             throw e
         } catch (_: Exception) {
             // Transient stream packet drops should not tear down an active call
+        }
+    }
+
+    fun observeIncomingCallSignals(callId: String, uid: String): Flow<List<CallSignal>> = flow {
+        val path = "calls/$callId/signals"
+        emitAll(
+            db.collection("calls").document(callId).collection("signals")
+                .whereEqualTo("recipientId", uid)
+                .snapshots()
+                .map { snap ->
+                    snap.toObjects(CallSignal::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        .sortedBy { it.createdAt ?: Timestamp(0, 0) }
+                }
+                .catch { error ->
+                    handleFlowError(error, OperationType.LIST, path, uid)
+                    throw error
+                }
+        )
+    }
+
+    suspend fun sendCallSignal(
+        callId: String,
+        recipientId: String,
+        participantIds: List<String>,
+        type: String,
+        sdp: String? = null,
+        candidate: String? = null,
+        sdpMid: String? = null,
+        sdpMLineIndex: Int? = null
+    ) {
+        val uid = auth.currentUser?.uid ?: return
+        val sigRef = db.collection("calls").document(callId).collection("signals").document()
+        try {
+            val payload = buildMap<String, Any> {
+                put("callId", callId)
+                put("senderId", uid)
+                put("recipientId", recipientId)
+                put("participantIds", participantIds)
+                put("type", type)
+                if (!sdp.isNullOrBlank()) put("sdp", sdp.take(29_500))
+                if (!candidate.isNullOrBlank()) put("candidate", candidate.take(2000))
+                if (!sdpMid.isNullOrBlank()) put("sdpMid", sdpMid.take(64))
+                if (sdpMLineIndex != null && sdpMLineIndex >= 0) put("sdpMLineIndex", sdpMLineIndex)
+                put("createdAt", FieldValue.serverTimestamp())
+            }
+            sigRef.set(payload).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.CREATE, sigRef.path, auth)
+        }
+    }
+
+    suspend fun deleteCallSignal(callId: String, signalId: String) {
+        if (signalId.isBlank()) return
+        try {
+            db.collection("calls").document(callId).collection("signals").document(signalId).delete().await()
+        } catch (_: Exception) {
         }
     }
 

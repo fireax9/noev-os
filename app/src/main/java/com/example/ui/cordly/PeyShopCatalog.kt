@@ -10,7 +10,8 @@ enum class FrameShapeStyle {
     PRISM_DIAMOND,
     DOUBLE_STARBURST,
     FLAME_CROWN,
-    MATRIX_DASHED
+    MATRIX_DASHED,
+    SUKUNA_SHRINE_HANDS
 }
 
 data class ProfileFrameItem(
@@ -279,15 +280,15 @@ object PeyShopCatalog {
         ProfileFrameItem(
             id = "jjk_sukuna_hands",
             title = "Sukuna: Shrine Hands",
-            subtitle = "Neo+ Malevolent Shrine Domain Expansion hands ring",
+            subtitle = "Neo+ blazing Malevolent Shrine Domain Expansion hands frame",
             price = 1100L,
-            ringColors = listOf(Color(0xFFEF4444), Color(0xFF7F1D1D), Color(0xFF9333EA), Color(0xFFEF4444)),
-            strokeDp = 4.6f,
+            ringColors = listOf(Color(0xFFFF4500), Color(0xFFEF4444), Color(0xFFF59E0B), Color(0xFF991B1B), Color(0xFFFF4500)),
+            strokeDp = 4.8f,
             animated = true,
-            shapeStyle = FrameShapeStyle.FLAME_CROWN,
+            shapeStyle = FrameShapeStyle.SUKUNA_SHRINE_HANDS,
             category = "anime",
             requiredRank = "neo_plus",
-            artworkResId = R.drawable.img_anime_sukuna
+            artworkResId = null
         ),
         ProfileFrameItem(
             id = "bluelock_egoist",
@@ -549,3 +550,54 @@ object PeyShopCatalog {
         return gifPresets.firstOrNull { it.id == gifId }
     }
 }
+
+sealed interface DecodedCustomSticker {
+    data class ImageSticker(val dataUri: String) : DecodedCustomSticker
+    data class EmojiSticker(val emoji: String, val accentHex: String, val title: String) : DecodedCustomSticker
+}
+
+object CustomStickerCodec {
+    private const val PREFIX_IMAGE = "custom_img:"
+    private const val PREFIX_EMOJI = "custom_emoji:"
+
+    fun encodeImageSticker(imageDataUri: String): String = "$PREFIX_IMAGE$imageDataUri"
+
+    fun encodeEmojiSticker(emoji: String, accentHex: String, title: String): String {
+        val safeEmoji = emoji.replace("|", "").ifBlank { "✨" }
+        val safeHex = accentHex.replace("|", "").ifBlank { "#5865F2" }
+        val safeTitle = title.replace("|", "").ifBlank { "Sticker" }
+        return "$PREFIX_EMOJI$safeEmoji|$safeHex|$safeTitle"
+    }
+
+    fun encodeForMessage(sticker: com.example.data.model.CustomSticker): String {
+        val img = sticker.imageData
+        return if (!img.isNullOrBlank()) {
+            encodeImageSticker(img)
+        } else {
+            encodeEmojiSticker(sticker.emoji, sticker.accentHex, sticker.title)
+        }
+    }
+
+    fun decode(mediaData: String?): DecodedCustomSticker? {
+        if (mediaData.isNullOrBlank()) return null
+        return when {
+            mediaData.startsWith(PREFIX_IMAGE) -> {
+                val uri = mediaData.removePrefix(PREFIX_IMAGE)
+                if (uri.isNotBlank()) DecodedCustomSticker.ImageSticker(uri) else null
+            }
+            mediaData.startsWith("data:image") -> {
+                DecodedCustomSticker.ImageSticker(mediaData)
+            }
+            mediaData.startsWith(PREFIX_EMOJI) -> {
+                val parts = mediaData.removePrefix(PREFIX_EMOJI).split("|", limit = 3)
+                DecodedCustomSticker.EmojiSticker(
+                    emoji = parts.getOrNull(0)?.ifBlank { "✨" } ?: "✨",
+                    accentHex = parts.getOrNull(1)?.ifBlank { "#5865F2" } ?: "#5865F2",
+                    title = parts.getOrNull(2)?.ifBlank { "Sticker" } ?: "Sticker"
+                )
+            }
+            else -> null
+        }
+    }
+}
+

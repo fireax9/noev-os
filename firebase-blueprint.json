@@ -217,7 +217,7 @@
         "channelName": { "type": "string" },
         "callType": { "type": "string", "enum": ["voice", "video"] },
         "status": { "type": "string", "enum": ["ringing", "active", "ended", "declined"] },
-        "videoQuality": { "type": "string", "enum": ["144p", "240p", "360p", "480p", "720p", "1080p", "4K"] },
+        "videoQuality": { "type": "string", "enum": ["144p", "240p", "360p", "480p", "720p", "1080p", "4K", "8K"] },
         "callerMuted": { "type": "boolean" },
         "calleeMuted": { "type": "boolean" },
         "callerVideoOn": { "type": "boolean" },
@@ -229,7 +229,7 @@
     },
     "CallStreamFrame": {
       "title": "CallStreamFrame",
-      "description": "Live participant PCM audio packet, amplitude meter, face filter, and aspect-preserved video frame.",
+      "description": "Live call participant metadata, voice effect, face filter, and requested quality.",
       "type": "object",
       "properties": {
         "callId": { "type": "string" },
@@ -248,6 +248,55 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["callId", "senderId", "senderName", "participantIds", "audioLevel", "videoEnabled", "muted", "updatedAt"]
+    },
+    "CallSignal": {
+      "title": "CallSignal",
+      "description": "Low-latency WebRTC P2P offer/answer/ICE signaling message.",
+      "type": "object",
+      "properties": {
+        "callId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "participantIds": { "type": "array" },
+        "type": { "type": "string", "enum": ["offer", "answer", "ice"] },
+        "sdp": { "type": "string" },
+        "candidate": { "type": "string" },
+        "sdpMid": { "type": "string" },
+        "sdpMLineIndex": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["callId", "senderId", "recipientId", "participantIds", "type", "createdAt"]
+    },
+    "ServerEvent": {
+      "title": "ServerEvent",
+      "description": "Scheduled Discord-style server event managed by server owner or Neo Plus members.",
+      "type": "object",
+      "properties": {
+        "serverId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "scheduledLabel": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["serverId", "creatorId", "creatorName", "title", "scheduledLabel", "createdAt"]
+    },
+    "CustomSticker": {
+      "title": "CustomSticker",
+      "description": "User-created custom sticker (photo or styled emoji) for personal or server chat trays.",
+      "type": "object",
+      "properties": {
+        "creatorId": { "type": "string" },
+        "scopeId": { "type": "string" },
+        "title": { "type": "string" },
+        "emoji": { "type": "string" },
+        "accentHex": { "type": "string" },
+        "imageData": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["creatorId", "title", "emoji", "accentHex", "createdAt"]
     },
     "CustomQuest": {
       "title": "CustomQuest",
@@ -290,6 +339,10 @@
       "schema": { "$ref": "#/entities/UserPrivate" },
       "description": "Owner-only user profile containing Gmail address PII."
     },
+    "/users/{userId}/custom_stickers/{stickerId}": {
+      "schema": { "$ref": "#/entities/CustomSticker" },
+      "description": "Personal custom stickers created by the user."
+    },
     "/public_profiles/{userId}": {
       "schema": { "$ref": "#/entities/PublicProfile" },
       "description": "Public non-PII user display profile."
@@ -314,6 +367,14 @@
       "schema": { "$ref": "#/entities/Server" },
       "description": "Discord-style friend servers."
     },
+    "/servers/{serverId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/ServerEvent" },
+      "description": "Scheduled server events."
+    },
+    "/servers/{serverId}/custom_stickers/{stickerId}": {
+      "schema": { "$ref": "#/entities/CustomSticker" },
+      "description": "Shared server custom stickers added by owner or Neo Plus members."
+    },
     "/server_invites/{inviteCode}": {
       "schema": { "$ref": "#/entities/ServerInvite" },
       "description": "Server invite codes."
@@ -328,7 +389,11 @@
     },
     "/calls/{callId}/streams/{senderId}": {
       "schema": { "$ref": "#/entities/CallStreamFrame" },
-      "description": "Live participant audio/video stream packets."
+      "description": "Live participant call stream metadata."
+    },
+    "/calls/{callId}/signals/{signalId}": {
+      "schema": { "$ref": "#/entities/CallSignal" },
+      "description": "WebRTC P2P SDP offer/answer and ICE signaling."
     },
     "/custom_quests/{questId}": {
       "schema": { "$ref": "#/entities/CustomQuest" },

@@ -179,7 +179,22 @@ data class AppStrings(
     val recordingStartedNotice: String = "Call audio recording started.",
     val recordingSavedNotice: String = "Call recording saved in app audio storage.",
     val shopAvatarFramesTab: String = "Avatar Rings",
-    val shopCardFramesTab: String = "Profile Cards"
+    val shopCardFramesTab: String = "Profile Cards",
+    val neoPlusRequiredNotice: String = "Unlock Neo Plus in Shop for 8K Ultra calls & full server control!",
+    val webrtcConnectedBadge: String = "Live P2P",
+    val editServerTitle: String = "Edit Server Settings",
+    val serverEventsHeader: String = "SERVER EVENTS",
+    val createEventButton: String = "+ Event",
+    val noEventsYet: String = "No scheduled events yet",
+    val eventTitleLabel: String = "Event Title",
+    val eventScheduleLabel: String = "Time / Schedule",
+    val eventDescriptionLabel: String = "Description (optional)",
+    val createStickerButton: String = "+ Create",
+    val createStickerTitle: String = "Create Custom Sticker",
+    val stickerNameLabel: String = "Sticker Name",
+    val stickerImageButton: String = "Pick Sticker Image",
+    val shareToServerLabel: String = "Share to Server Stickers",
+    val customStickersHeader: String = "Custom"
 )
 
 val EnglishStrings = AppStrings(
@@ -477,7 +492,22 @@ val ArabicStrings = AppStrings(
     recordingStartedNotice = "بدأ تسجيل صوت المكالمة.",
     recordingSavedNotice = "تم حفظ تسجيل المكالمة بنجاح.",
     shopAvatarFramesTab = "إطارات الدائرة",
-    shopCardFramesTab = "إطارات البطاقة"
+    shopCardFramesTab = "إطارات البطاقة",
+    neoPlusRequiredNotice = "فعّل رتبة نيو بلس من المتجر لمكالمات 8K والتحكم الكامل بالسيرفر!",
+    webrtcConnectedBadge = "بث مباشر فوري",
+    editServerTitle = "تعديل إعدادات السيرفر",
+    serverEventsHeader = "أحداث وفعاليات السيرفر",
+    createEventButton = "+ حدث",
+    noEventsYet = "لا توجد أحداث مجدولة حالياً",
+    eventTitleLabel = "عنوان الحدث",
+    eventScheduleLabel = "الوقت / الموعد",
+    eventDescriptionLabel = "الوصف (اختياري)",
+    createStickerButton = "+ إنشاء",
+    createStickerTitle = "إنشاء ملصق مخصص",
+    stickerNameLabel = "اسم الملصق",
+    stickerImageButton = "اختر صورة للملصق",
+    shareToServerLabel = "نشر كملصق في هذا السيرفر",
+    customStickersHeader = "ملصقات مخصصة"
 )
 
 val FrenchStrings = EnglishStrings.copy(

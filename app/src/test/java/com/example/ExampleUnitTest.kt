@@ -187,7 +187,12 @@ class ExampleUnitTest {
         "Anime frame ${frame.id} must be Dragon Ball, Jujutsu Kaisen, or Blue Lock",
         allowedPrefixes.any { frame.id.startsWith(it) }
       )
-      assertNotNull("Anime circular frame ${frame.id} must have real artworkResId", frame.artworkResId)
+      if (frame.id == "jjk_sukuna_hands") {
+        assertEquals(com.example.ui.cordly.FrameShapeStyle.SUKUNA_SHRINE_HANDS, frame.shapeStyle)
+        assertNull("jjk_sukuna_hands renders custom vector hands & fire directly without corner thumbnail", frame.artworkResId)
+      } else {
+        assertNotNull("Anime circular frame ${frame.id} must have real artworkResId", frame.artworkResId)
+      }
       val combined = "${frame.title} ${frame.subtitle}".lowercase()
       forbiddenTerms.forEach { banned -> assertFalse(combined.contains(banned)) }
     }
@@ -220,8 +225,8 @@ class ExampleUnitTest {
   }
 
   @Test
-  fun videoQualityPresetsAndAspectRatio_cover144pTo4KWithoutStretching() {
-    val expectedIds = listOf("144p", "240p", "360p", "480p", "720p", "1080p", "4K")
+  fun videoQualityPresetsAndAspectRatio_cover144pTo8KWithoutStretching() {
+    val expectedIds = listOf("144p", "240p", "360p", "480p", "720p", "1080p", "4K", "8K")
     assertEquals(expectedIds, com.example.ui.cordly.VideoQualityPreset.entries.map { it.id })
 
     // Portrait 9:16 source -> aspect ratio preserved at 4K & 144p

@@ -405,21 +405,28 @@ object AppAppearanceStore {
         prefs.edit().putString(KEY_APP_LOGO, variant.storageKey).apply()
         val pm = context.packageManager
         val pkg = context.packageName
-        AppLogoVariant.entries.forEach { entry ->
-            val targetState = if (entry == variant) {
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-            } else {
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED
-            }
-            try {
-                pm.setComponentEnabledSetting(
-                    ComponentName(pkg, entry.aliasName),
-                    targetState,
-                    PackageManager.DONT_KILL_APP
-                )
-            } catch (_: Exception) {
-            }
+        // CRITICAL: Enable the newly selected LAUNCHER alias FIRST before disabling others,
+        // otherwise Android sees zero enabled LAUNCHER activities transiently and kills/resets the task.
+        try {
+            pm.setComponentEnabledSetting(
+                ComponentName(pkg, variant.aliasName),
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            )
+        } catch (_: Exception) {
         }
+        AppLogoVariant.entries
+            .filter { it != variant }
+            .forEach { entry ->
+                try {
+                    pm.setComponentEnabledSetting(
+                        ComponentName(pkg, entry.aliasName),
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP
+                    )
+                } catch (_: Exception) {
+                }
+            }
         return variant
     }
 

@@ -67,4 +67,28 @@ class ExampleRobolectricTest {
     AppAppearanceStore.saveLayoutPrefs(context, customLayout)
     assertEquals(customLayout, AppAppearanceStore.loadLayoutPrefs(context))
   }
+
+  @Test
+  fun `neo plus 8k quality sukuna frame and custom sticker codec behave as expected`() {
+    assertEquals("neo_plus", com.example.ui.cordly.VideoQualityPreset.Q8K.requiredRank)
+    assertEquals("normal", com.example.ui.cordly.VideoQualityPreset.Q4K.requiredRank)
+
+    val sukunaFrame = com.example.ui.cordly.PeyShopCatalog.findById("jjk_sukuna_hands")
+    assertEquals(com.example.ui.cordly.FrameShapeStyle.SUKUNA_SHRINE_HANDS, sukunaFrame.shapeStyle)
+    assertEquals(null, sukunaFrame.artworkResId)
+
+    val imgEncoded = com.example.ui.cordly.CustomStickerCodec.encodeImageSticker("data:image/png;base64,ABC123")
+    val imgDecoded = com.example.ui.cordly.CustomStickerCodec.decode(imgEncoded)
+    assertEquals(
+      com.example.ui.cordly.DecodedCustomSticker.ImageSticker("data:image/png;base64,ABC123"),
+      imgDecoded
+    )
+
+    val emojiEncoded = com.example.ui.cordly.CustomStickerCodec.encodeEmojiSticker("🔥", "#EF4444", "Malevolent Fire")
+    val emojiDecoded = com.example.ui.cordly.CustomStickerCodec.decode(emojiEncoded)
+    assertEquals(
+      com.example.ui.cordly.DecodedCustomSticker.EmojiSticker("🔥", "#EF4444", "Malevolent Fire"),
+      emojiDecoded
+    )
+  }
 }

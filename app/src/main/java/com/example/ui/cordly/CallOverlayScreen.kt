@@ -2,16 +2,8 @@ package com.example.ui.cordly
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -20,7 +12,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -89,10 +80,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -102,8 +91,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.CallSession
+import com.example.data.model.CallSignal
 import com.example.data.model.CallStreamFrame
 import com.example.data.repository.CordlyRepository
 import com.example.ui.theme.CordlyAmber
@@ -119,7 +109,10 @@ import com.example.ui.theme.CordlyTextPrimary
 import com.example.ui.theme.CordlyTextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import java.util.concurrent.Executors
+import org.webrtc.EglBase
+import org.webrtc.RendererCommon
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 
 data class InviteableFriend(
     val uid: String,
@@ -234,7 +227,17 @@ fun ActiveCallOverlayDialog(
     currentUserId: String,
     currentUserRank: String,
     streams: List<CallStreamFrame>,
+    incomingSignals: List<CallSignal> = emptyList(),
     inviteableFriends: List<InviteableFriend> = emptyList(),
+    onSendSignal: (
+        recipientId: String,
+        type: String,
+        sdp: String?,
+        candidate: String?,
+        sdpMid: String?,
+        sdpMLineIndex: Int?
+    ) -> Unit = { _, _, _, _, _, _ -> },
+    onConsumeSignal: (signalId: String) -> Unit = {},
     onToggleMute: (Boolean) -> Unit,
     onToggleVideo: (Boolean) -> Unit,
     onUpdateVideoQuality: (String) -> Unit,
@@ -256,7 +259,6 @@ fun ActiveCallOverlayDialog(
 ) {
     val strings = LocalAppStrings.current
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     val isUltraOrPlus = currentUserRank == CordlyRepository.RANK_ULTRA || currentUserRank == CordlyRepository.RANK_NEO_PLUS
     val isNeoPlus = currentUserRank == CordlyRepository.RANK_NEO_PLUS
@@ -264,14 +266,13 @@ fun ActiveCallOverlayDialog(
     var isMuted by remember(call.id) { mutableStateOf(false) }
     var isSpeakerOn by remember(call.id) { mutableStateOf(true) }
     var isVideoEnabled by remember(call.id) { mutableStateOf(call.callType == "video") }
-    var useFrontCamera by remember(call.id) { mutableStateOf(true) }
     var elapsedSeconds by remember(call.id) { mutableLongStateOf(0L) }
-    var localMicAmplitude by remember(call.id) { mutableDoubleStateOf(0.0) }
-    var latestCapturedFrame by remember(call.id) { mutableStateOf<String?>(null) }
 
     var selectedQuality by remember(call.id) { mutableStateOf(VideoQualityPreset.fromId(call.videoQuality)) }
     val latestOnPublishSample by rememberUpdatedState(onPublishStreamSample)
     val latestOnStatusToast by rememberUpdatedState(onStatusToast)
+    val latestOnSendSignal by rememberUpdatedState(onSendSignal)
+    val latestOnConsumeSignal by rememberUpdatedState(onConsumeSignal)
 
     // Shared global Video Quality sync: whenever ANY peer changes quality, update for everyone
     LaunchedEffect(call.videoQuality) {
@@ -318,11 +319,27 @@ fun ActiveCallOverlayDialog(
     }
 
     val audioEngine = remember(call.id) { CallAudioEngine(context.applicationContext) }
+    val webRtc = remember(call.id) {
+        WebRtcCallManager(
+            context = context.applicationContext,
+            currentUserId = currentUserId,
+            onSendSignal = { recipientId, type, sdp, candidate, sdpMid, sdpMLineIndex ->
+                latestOnSendSignal(recipientId, type, sdp, candidate, sdpMid, sdpMLineIndex)
+            },
+            onConsumeSignal = { sigId ->
+                latestOnConsumeSignal(sigId)
+            }
+        )
+    }
 
-    // Configure audio routing & start non-blocking AudioTrack playback + release on dispose
+    val localTrack by webRtc.localVideoTrack.collectAsStateWithLifecycle()
+    val remoteTracks by webRtc.remoteVideoTracks.collectAsStateWithLifecycle()
+    val isFrontCam by webRtc.isUsingFrontCamera.collectAsStateWithLifecycle()
+    val connectedPeers by webRtc.connectedPeerCount.collectAsStateWithLifecycle()
+
+    // Configure speakerphone routing without opening dual AudioRecord/AudioTrack (WebRTC owns hardware audio).
     DisposableEffect(call.id, isSpeakerOn) {
         val prev = CallAudioEngine.configureAudioRouting(context, isSpeakerOn)
-        audioEngine.startPlaybackTrack(scope)
         onDispose {
             CallAudioEngine.restoreAudioRouting(context, prev)
         }
@@ -330,8 +347,27 @@ fun ActiveCallOverlayDialog(
     DisposableEffect(call.id) {
         onDispose {
             SoundEffectsManager.stopRingingLoop()
+            webRtc.release()
             audioEngine.release()
         }
+    }
+
+    LaunchedEffect(call.id, call.status, call.participantIds) {
+        webRtc.ensurePeersAndConnect(call.status, call.participantIds)
+    }
+
+    LaunchedEffect(incomingSignals) {
+        webRtc.handleIncomingSignals(incomingSignals)
+    }
+
+    LaunchedEffect(hasAudioPermission, hasCameraPermission, isVideoEnabled, isMuted, selectedQuality) {
+        webRtc.startOrUpdateLocalMedia(
+            hasAudioPermission = hasAudioPermission,
+            hasCameraPermission = hasCameraPermission,
+            videoEnabled = isVideoEnabled,
+            muted = isMuted,
+            preset = selectedQuality
+        )
     }
 
     // Ringback sound while ringing; connect chime once active
@@ -354,61 +390,34 @@ fun ActiveCallOverlayDialog(
         }
     }
 
-    // Capture real mic PCM -> Gain Boost -> Voice Changer DSP -> µ-law Base64 -> Publish to peers
-    LaunchedEffect(call.id, hasAudioPermission) {
-        if (!hasAudioPermission) return@LaunchedEffect
-        audioEngine.startCaptureLoop(
-            scope = scope,
-            isMutedProvider = { isMuted },
-            voiceEffectProvider = { selectedVoiceEffect },
-            onPacketReady = { audioB64, amp, seq ->
-                localMicAmplitude = amp
-                val frame = if (isVideoEnabled && hasCameraPermission) latestCapturedFrame else null
-                latestOnPublishSample(
-                    frame,
-                    audioB64,
-                    seq,
-                    selectedVoiceEffect.id,
-                    selectedFaceFilter.id,
-                    selectedQuality.id,
-                    amp,
-                    isVideoEnabled && hasCameraPermission,
-                    isMuted
-                )
-            }
+    val localMicAmplitude = if (!isMuted && call.status == "active" && connectedPeers > 0) 0.36 else 0.0
+
+    // Lightweight call metadata sync (no heavy audio/video Base64 in Firestore)
+    LaunchedEffect(
+        call.id,
+        call.status,
+        selectedVoiceEffect,
+        selectedFaceFilter,
+        selectedQuality,
+        isVideoEnabled,
+        hasCameraPermission,
+        isMuted,
+        connectedPeers
+    ) {
+        latestOnPublishSample(
+            null,
+            null,
+            0L,
+            selectedVoiceEffect.id,
+            selectedFaceFilter.id,
+            selectedQuality.id,
+            localMicAmplitude,
+            isVideoEnabled && hasCameraPermission,
+            isMuted
         )
     }
 
-    // Non-blocking enqueue of every new remote audio packet for background AudioTrack playback
     val remoteStreams = streams.filter { it.senderId != currentUserId }
-    LaunchedEffect(remoteStreams) {
-        remoteStreams.forEach { frame ->
-            if (!frame.muted) {
-                audioEngine.enqueueRemoteAudioPacket(frame.senderId, frame.audioData, frame.audioSeq)
-            }
-        }
-    }
-
-    // Video/presence keep-alive loop (runs whenever mic is muted, permission missing, or video frame changes)
-    LaunchedEffect(call.id, hasAudioPermission) {
-        while (isActive) {
-            if (!hasAudioPermission || isMuted) {
-                val frame = if (isVideoEnabled && hasCameraPermission) latestCapturedFrame else null
-                latestOnPublishSample(
-                    frame,
-                    null,
-                    0L,
-                    selectedVoiceEffect.id,
-                    selectedFaceFilter.id,
-                    selectedQuality.id,
-                    localMicAmplitude,
-                    isVideoEnabled && hasCameraPermission,
-                    isMuted
-                )
-            }
-            delay(900L)
-        }
-    }
 
     val isCaller = call.callerId == currentUserId
     val peerName = when {
@@ -561,33 +570,37 @@ fun ActiveCallOverlayDialog(
                         .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isVideoEnabled && hasCameraPermission) {
+                    val firstRemote = remoteStreams.firstOrNull()
+                    val remoteTrack = firstRemote?.senderId?.let { remoteTracks[it] }
+                        ?: remoteTracks.values.firstOrNull()
+                    val showRemoteVideo = remoteTrack != null && (firstRemote?.videoEnabled != false)
+                    val showVideoLayout = (isVideoEnabled && hasCameraPermission) || showRemoteVideo
+
+                    if (showVideoLayout) {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize()
                         ) {
-                            // Remote video stage — strictly uses ContentScale.Fit so peer image NEVER stretches!
+                            // Remote WebRTC P2P video stage — SCALE_ASPECT_FIT so peer image NEVER stretches!
                             Surface(
                                 color = Color.Black,
                                 shape = RoundedCornerShape(22.dp),
                                 border = BorderStroke(
                                     width = 1.5.dp,
-                                    color = if ((remoteStreams.firstOrNull()?.audioLevel ?: 0.0) > 0.16) CordlyEmerald else CordlyDivider
+                                    color = if (connectedPeers > 0) CordlyEmerald else CordlyDivider
                                 ),
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxWidth()
                             ) {
-                                val firstRemote = remoteStreams.firstOrNull()
-                                val remoteBitmap = remember(firstRemote?.frameData) {
-                                    decodeBase64Bitmap(firstRemote?.frameData)
-                                }
                                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    if (remoteBitmap != null && firstRemote?.videoEnabled == true) {
-                                        Image(
-                                            bitmap = remoteBitmap.asImageBitmap(),
-                                            contentDescription = peerName,
-                                            contentScale = ContentScale.Fit,
+                                    if (showRemoteVideo) {
+                                        WebRtcVideoSurface(
+                                            track = remoteTrack,
+                                            eglContext = webRtc.eglBase.eglBaseContext,
+                                            mirror = false,
+                                            isOverlay = false,
+                                            faceFilter = CallFaceFilter.fromId(firstRemote?.faceFilter),
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     } else {
@@ -614,64 +627,88 @@ fun ActiveCallOverlayDialog(
                                         }
                                     }
 
-                                    // Peer quality pill + Flip Camera button
-                                    if (firstRemote != null) {
-                                        Surface(
-                                            color = Color.Black.copy(alpha = 0.65f),
-                                            shape = RoundedCornerShape(10.dp),
-                                            modifier = Modifier
-                                                .align(Alignment.TopStart)
-                                                .padding(10.dp)
-                                        ) {
-                                            Text(
-                                                text = "${firstRemote.videoQuality} • ${CallFaceFilter.fromId(firstRemote.faceFilter).emoji}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = CordlyCyan,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                            )
+                                    // Peer quality + P2P Live indicator pills
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(10.dp)
+                                    ) {
+                                        if (connectedPeers > 0) {
+                                            Surface(
+                                                color = CordlyEmerald.copy(alpha = 0.25f),
+                                                shape = RoundedCornerShape(10.dp),
+                                                border = BorderStroke(1.dp, CordlyEmerald)
+                                            ) {
+                                                Text(
+                                                    text = strings.webrtcConnectedBadge,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = CordlyEmerald,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
+                                        }
+                                        if (firstRemote != null) {
+                                            Surface(
+                                                color = Color.Black.copy(alpha = 0.65f),
+                                                shape = RoundedCornerShape(10.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${firstRemote.videoQuality} • ${CallFaceFilter.fromId(firstRemote.faceFilter).emoji}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = CordlyCyan,
+                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                )
+                                            }
                                         }
                                     }
 
-                                    Surface(
-                                        color = Color.Black.copy(alpha = 0.68f),
-                                        shape = RoundedCornerShape(14.dp),
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(10.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .clickable { useFrontCamera = !useFrontCamera }
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    if (isVideoEnabled && hasCameraPermission) {
+                                        Surface(
+                                            color = Color.Black.copy(alpha = 0.68f),
+                                            shape = RoundedCornerShape(14.dp),
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(10.dp)
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .clickable { webRtc.switchCamera() }
                                         ) {
-                                            Icon(Icons.Rounded.Cameraswitch, contentDescription = strings.flipCamera, tint = CordlyCyan, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Text(strings.flipCamera, style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Icon(Icons.Rounded.Cameraswitch, contentDescription = strings.flipCamera, tint = CordlyCyan, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(strings.flipCamera, style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                            }
                                         }
                                     }
                                 }
                             }
 
-                            // Self CameraX live preview with FIT_CENTER (no stretching!) + Snapchat Face Filter overlay
-                            Surface(
-                                color = Color.Black,
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(
-                                    width = 1.5.dp,
-                                    color = if (localMicAmplitude > 0.14 && !isMuted) CordlyEmerald else CordlyBlurple
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(175.dp)
-                            ) {
-                                CameraXLivePreview(
-                                    useFrontCamera = useFrontCamera,
-                                    qualityPreset = selectedQuality,
-                                    faceFilter = selectedFaceFilter,
-                                    onFrameEncoded = { latestCapturedFrame = it },
-                                    modifier = Modifier.fillMaxSize()
-                                )
+                            // Self WebRTC live preview with SCALE_ASPECT_FIT (no stretching!) + Snapchat Face Filter overlay
+                            if (isVideoEnabled && hasCameraPermission) {
+                                Surface(
+                                    color = Color.Black,
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(
+                                        width = 1.5.dp,
+                                        color = if (!isMuted && connectedPeers > 0) CordlyEmerald else CordlyBlurple
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(175.dp)
+                                ) {
+                                    WebRtcVideoSurface(
+                                        track = localTrack,
+                                        eglContext = webRtc.eglBase.eglBaseContext,
+                                        mirror = isFrontCam,
+                                        isOverlay = true,
+                                        faceFilter = selectedFaceFilter,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
                             }
                         }
                     } else {
@@ -729,26 +766,40 @@ fun ActiveCallOverlayDialog(
                         ) {
                             VideoQualityPreset.entries.forEach { preset ->
                                 val selected = preset == selectedQuality
+                                val rankLocked = preset.requiredRank == CordlyRepository.RANK_NEO_PLUS && !isNeoPlus
                                 Surface(
                                     color = if (selected) CordlyBlurple else CordlyCardSurface,
                                     shape = RoundedCornerShape(12.dp),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (preset.isHdTier) CordlyCyan.copy(alpha = 0.7f) else CordlyDivider
+                                        when {
+                                            rankLocked -> CordlyAmber
+                                            preset.isHdTier -> CordlyCyan.copy(alpha = 0.7f)
+                                            else -> CordlyDivider
+                                        }
                                     ),
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable {
-                                            selectedQuality = preset
-                                            onUpdateVideoQuality(preset.id)
-                                            onStatusToast("${strings.videoQualityLabel}: ${preset.label}")
+                                            if (rankLocked) {
+                                                onStatusToast(strings.neoPlusRequiredNotice)
+                                            } else {
+                                                selectedQuality = preset
+                                                webRtc.applyVideoQuality(preset)
+                                                onUpdateVideoQuality(preset.id)
+                                                onStatusToast("${strings.videoQualityLabel}: ${preset.label}")
+                                            }
                                         }
                                         .testTag("quality_chip_${preset.id}")
                                 ) {
                                     Text(
-                                        text = preset.label,
+                                        text = if (rankLocked) "🔒 ${preset.label}" else preset.label,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (selected) Color.White else CordlyTextPrimary,
+                                        color = when {
+                                            rankLocked -> CordlyAmber
+                                            selected -> Color.White
+                                            else -> CordlyTextPrimary
+                                        },
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
                                     )
@@ -913,8 +964,10 @@ fun ActiveCallOverlayDialog(
                                 inactiveColor = CordlyCrimson,
                                 testTag = "call_mute_button",
                                 onClick = {
-                                    isMuted = !isMuted
-                                    onToggleMute(isMuted)
+                                    val next = !isMuted
+                                    isMuted = next
+                                    webRtc.setMuted(next)
+                                    onToggleMute(next)
                                 }
                             )
 
@@ -931,6 +984,7 @@ fun ActiveCallOverlayDialog(
                                     if (next && !hasCameraPermission) {
                                         permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
                                     }
+                                    webRtc.setVideoEnabled(next, hasCameraPermission)
                                     onToggleVideo(next)
                                 }
                             )
@@ -1159,79 +1213,58 @@ private fun CallControlPill(
 }
 
 @Composable
-private fun CameraXLivePreview(
-    useFrontCamera: Boolean,
-    qualityPreset: VideoQualityPreset,
+private fun WebRtcVideoSurface(
+    track: VideoTrack?,
+    eglContext: EglBase.Context,
+    mirror: Boolean,
+    isOverlay: Boolean,
     faceFilter: CallFaceFilter,
-    onFrameEncoded: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val previewView = remember {
-        PreviewView(context).apply {
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            scaleType = PreviewView.ScaleType.FIT_CENTER
+    val renderer = remember(eglContext, isOverlay) {
+        SurfaceViewRenderer(context).apply {
+            init(eglContext, null)
+            setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FIT)
+            setEnableHardwareScaler(true)
+            setZOrderMediaOverlay(isOverlay)
         }
     }
-    val executor = remember { Executors.newSingleThreadExecutor() }
-    val lastEncodedMs = remember { longArrayOf(0L) }
-    val activeQualityRef = remember { arrayOf(qualityPreset) }
-    val activeFilterRef = remember { arrayOf(faceFilter) }
-    activeQualityRef[0] = qualityPreset
-    activeFilterRef[0] = faceFilter
 
-    DisposableEffect(Unit) {
+    LaunchedEffect(renderer, mirror) {
+        renderer.setMirror(mirror)
+    }
+
+    DisposableEffect(renderer, track) {
+        if (track != null) {
+            try {
+                track.addSink(renderer)
+            } catch (_: Exception) {
+            }
+        }
+        onDispose {
+            if (track != null) {
+                try {
+                    track.removeSink(renderer)
+                } catch (_: Exception) {
+                }
+            }
+        }
+    }
+
+    DisposableEffect(renderer) {
         onDispose {
             try {
-                ProcessCameraProvider.getInstance(context).get().unbindAll()
+                renderer.clearImage()
+                renderer.release()
             } catch (_: Exception) {
             }
-            executor.shutdownNow()
         }
-    }
-
-    LaunchedEffect(useFrontCamera) {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-        cameraProviderFuture.addListener({
-            try {
-                val cameraProvider = cameraProviderFuture.get()
-                val preview = Preview.Builder().build().also {
-                    it.surfaceProvider = previewView.surfaceProvider
-                }
-                val analysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                analysis.setAnalyzer(executor) { imageProxy ->
-                    val now = System.currentTimeMillis()
-                    if (now - lastEncodedMs[0] >= 900L) {
-                        lastEncodedMs[0] = now
-                        CallVideoFrameProcessor.encodeProxyToDataUri(
-                            image = imageProxy,
-                            mirror = useFrontCamera,
-                            qualityPreset = activeQualityRef[0],
-                            faceFilter = activeFilterRef[0]
-                        )?.let { dataUri ->
-                            onFrameEncoded(dataUri)
-                        }
-                    }
-                    imageProxy.close()
-                }
-                val selector = if (useFrontCamera) {
-                    CameraSelector.DEFAULT_FRONT_CAMERA
-                } else {
-                    CameraSelector.DEFAULT_BACK_CAMERA
-                }
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(lifecycleOwner, selector, preview, analysis)
-            } catch (_: Exception) {
-            }
-        }, ContextCompat.getMainExecutor(context))
     }
 
     Box(modifier = modifier) {
         AndroidView(
-            factory = { previewView },
+            factory = { renderer },
             modifier = Modifier.fillMaxSize()
         )
         if (faceFilter != CallFaceFilter.NONE) {
@@ -1249,13 +1282,3 @@ private fun CameraXLivePreview(
     }
 }
 
-private fun decodeBase64Bitmap(dataUri: String?): Bitmap? {
-    if (dataUri.isNullOrBlank()) return null
-    return try {
-        val clean = dataUri.substringAfter("base64,", dataUri)
-        val bytes = Base64.decode(clean, Base64.DEFAULT)
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-    } catch (_: Exception) {
-        null
-    }
-}

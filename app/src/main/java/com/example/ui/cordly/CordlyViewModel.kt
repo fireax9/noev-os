@@ -4,15 +4,18 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.CallSession
+import com.example.data.model.CallSignal
 import com.example.data.model.CallStreamFrame
 import com.example.data.model.Conversation
 import com.example.data.model.CustomQuest
+import com.example.data.model.CustomSticker
 import com.example.data.model.DeveloperTicket
 import com.example.data.model.DirectMessage
 import com.example.data.model.Friendship
 import com.example.data.model.LookupKey
 import com.example.data.model.PublicProfile
 import com.example.data.model.Server
+import com.example.data.model.ServerEvent
 import com.example.data.model.ServerMessage
 import com.example.data.model.UserPrivate
 import com.example.data.repository.CordlyRepository
@@ -221,6 +224,43 @@ class CordlyViewModel(
             } else {
                 repository.observeCallStreams(callId, currentUserId)
                     .catch { emit(emptyList()) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val incomingCallSignals: StateFlow<List<CallSignal>> = _joinedCallId
+        .flatMapLatest { callId ->
+            if (callId.isNullOrBlank()) {
+                flowOf(emptyList())
+            } else {
+                repository.observeIncomingCallSignals(callId, currentUserId)
+                    .catch { emit(emptyList()) }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val activeServerEvents: StateFlow<List<ServerEvent>> = _destination
+        .flatMapLatest { dest ->
+            if (dest is ActiveDestination.ServerSpace) {
+                repository.observeServerEvents(dest.serverId, currentUserId)
+                    .catch { emit(emptyList()) }
+            } else {
+                flowOf(emptyList())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val userCustomStickers: StateFlow<List<CustomSticker>> = repository.observeUserCustomStickers(currentUserId)
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    val serverCustomStickers: StateFlow<List<CustomSticker>> = _activeChat
+        .flatMapLatest { target ->
+            if (target is ActiveChatTarget.ServerChannel) {
+                repository.observeServerCustomStickers(target.serverId, currentUserId)
+                    .catch { emit(emptyList()) }
+            } else {
+                flowOf(emptyList())
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
@@ -467,6 +507,125 @@ class CordlyViewModel(
                     _snackbarMessage.value = err.localizedMessage ?: "Could not add channel."
                 }
             _isBusy.value = false
+        }
+    }
+
+    fun deleteChannel(server: Server, channelName: String) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.deleteChannelFromServer(server, channelName)
+                .onSuccess {
+                    val remaining = server.channels.filter { it != channelName }
+                    val dest = _destination.value
+                    if (dest is ActiveDestination.ServerSpace && dest.serverId == server.id && dest.channelName == channelName) {
+                        _destination.value = ActiveDestination.ServerSpace(server.id, remaining.firstOrNull() ?: "general")
+                    }
+                    val chat = _activeChat.value
+                    if (chat is ActiveChatTarget.ServerChannel && chat.serverId == server.id && chat.channelName == channelName) {
+                        _activeChat.value = null
+                    }
+                    _snackbarMessage.value = "Channel #$channelName removed."
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not delete channel."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun updateServerSettings(
+        server: Server,
+        name: String,
+        description: String?,
+        iconEmoji: String,
+        accentHex: String,
+        iconUrl: String?,
+        onSaved: () -> Unit
+    ) {
+        val profile = (ownProfile.value as? UiState.Success)?.data
+        val isNeoPlus = CordlyRepository.effectiveRank(profile) == CordlyRepository.RANK_NEO_PLUS
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.updateServerSettings(
+                server = server,
+                name = name,
+                description = description,
+                iconEmoji = iconEmoji,
+                accentHex = accentHex,
+                iconUrl = iconUrl,
+                isNeoPlusMember = isNeoPlus
+            )
+                .onSuccess {
+                    _snackbarMessage.value = "Server updated!"
+                    onSaved()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not update server."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun createServerEvent(
+        server: Server,
+        title: String,
+        description: String?,
+        scheduledLabel: String,
+        onCreated: () -> Unit
+    ) {
+        val profile = (ownProfile.value as? UiState.Success)?.data ?: return
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.createServerEvent(server, profile, title, description, scheduledLabel)
+                .onSuccess { ev ->
+                    _snackbarMessage.value = "Event created: ${ev.title}"
+                    onCreated()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not create event."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun deleteServerEvent(serverId: String, eventId: String) {
+        viewModelScope.launch {
+            repository.deleteServerEvent(serverId, eventId)
+                .onSuccess { _snackbarMessage.value = "Event deleted." }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not delete event."
+                }
+        }
+    }
+
+    fun createCustomSticker(
+        title: String,
+        emoji: String,
+        accentHex: String,
+        imageData: String?,
+        serverId: String? = null,
+        onCreated: () -> Unit = {}
+    ) {
+        _isBusy.value = true
+        viewModelScope.launch {
+            repository.createCustomSticker(title, emoji, accentHex, imageData, serverId)
+                .onSuccess { sticker ->
+                    _snackbarMessage.value = "Sticker '${sticker.title}' saved!"
+                    onCreated()
+                }
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not create sticker."
+                }
+            _isBusy.value = false
+        }
+    }
+
+    fun deleteCustomSticker(stickerId: String, serverId: String? = null) {
+        viewModelScope.launch {
+            repository.deleteCustomSticker(stickerId, serverId)
+                .onFailure { err ->
+                    _snackbarMessage.value = err.localizedMessage ?: "Could not delete sticker."
+                }
         }
     }
 
@@ -965,6 +1124,35 @@ class CordlyViewModel(
         }
     }
 
+    fun sendCallSignal(
+        call: CallSession,
+        recipientId: String,
+        type: String,
+        sdp: String? = null,
+        candidate: String? = null,
+        sdpMid: String? = null,
+        sdpMLineIndex: Int? = null
+    ) {
+        viewModelScope.launch {
+            repository.sendCallSignal(
+                callId = call.id,
+                recipientId = recipientId,
+                participantIds = call.participantIds,
+                type = type,
+                sdp = sdp,
+                candidate = candidate,
+                sdpMid = sdpMid,
+                sdpMLineIndex = sdpMLineIndex
+            )
+        }
+    }
+
+    fun deleteCallSignal(callId: String, signalId: String) {
+        viewModelScope.launch {
+            repository.deleteCallSignal(callId, signalId)
+        }
+    }
+
     fun publishCallStreamSample(
         call: CallSession,
         frameData: String?,
@@ -979,31 +1167,21 @@ class CordlyViewModel(
     ) {
         val profile = (ownProfile.value as? UiState.Success)?.data ?: return
         viewModelScope.launch {
-            streamPublishMutex.withLock {
-                val frameToSend = if (!videoEnabled) {
-                    lastSentVideoFrameByCall.remove(call.id)
-                    null
-                } else if (!frameData.isNullOrBlank() && lastSentVideoFrameByCall[call.id] != frameData) {
-                    lastSentVideoFrameByCall[call.id] = frameData
-                    frameData
-                } else {
-                    null
-                }
-                repository.publishCallStreamFrame(
-                    callId = call.id,
-                    sender = profile,
-                    participantIds = call.participantIds,
-                    frameData = frameToSend,
-                    audioData = audioData,
-                    audioSeq = audioSeq,
-                    voiceEffect = voiceEffect,
-                    faceFilter = faceFilter,
-                    videoQuality = videoQuality,
-                    audioLevel = audioLevel,
-                    videoEnabled = videoEnabled,
-                    muted = muted
-                )
-            }
+            // Audio & video media flow directly over real-time P2P WebRTC; only lightweight state syncs here.
+            repository.publishCallStreamFrame(
+                callId = call.id,
+                sender = profile,
+                participantIds = call.participantIds,
+                frameData = null,
+                audioData = null,
+                audioSeq = 0L,
+                voiceEffect = voiceEffect,
+                faceFilter = faceFilter,
+                videoQuality = videoQuality,
+                audioLevel = audioLevel,
+                videoEnabled = videoEnabled,
+                muted = muted
+            )
         }
     }
 

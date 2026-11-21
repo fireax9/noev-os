@@ -678,3 +678,194 @@ test("Ranks, Ultra directory query isolation, Neo Plus custom quests, and develo
   await assertFails(bobDb.collection("dev_messages").doc("t_1").get());
 });
 
+test("8K calls, WebRTC signals, Neo+ full server control/events, and custom stickers", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const charlieDb = testEnv.authenticatedContext(CHARLIE_UID).firestore();
+
+  // Seed user docs: Alice is Normal, Bob is Neo+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).set({
+      userId: ALICE_UID,
+      email: "alice@gmail.com",
+      displayName: "Alice",
+      friendCode: "NEV-AL1C",
+      status: "online",
+      rank: "normal",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("users").doc(BOB_UID).set({
+      userId: BOB_UID,
+      email: "bob@gmail.com",
+      displayName: "Bob",
+      friendCode: "NEV-B0B1",
+      status: "online",
+      rank: "neo_plus",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Personal custom stickers: Bob creates, Charlie cannot read Bob's personal stickers
+  await assertSucceeds(
+    bobDb.collection("users").doc(BOB_UID).collection("custom_stickers").doc("st_1").set({
+      creatorId: BOB_UID,
+      title: "Neo Hype",
+      emoji: "🔥",
+      accentHex: "#F59E0B",
+      imageData: "data:image/jpeg;base64,aGVsbG8=",
+      createdAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(bobDb.collection("users").doc(BOB_UID).collection("custom_stickers").get());
+  await assertFails(charlieDb.collection("users").doc(BOB_UID).collection("custom_stickers").get());
+
+  // Server created by Alice; Bob (Neo+) and Charlie join via invite
+  const serverId = "srv_ctrl_01";
+  const inviteCode = "CTRL99";
+  await assertSucceeds(
+    aliceDb.collection("servers").doc(serverId).set({
+      name: "Original Hub",
+      iconEmoji: "🎮",
+      accentHex: "#5865F2",
+      ownerId: ALICE_UID,
+      inviteCode: inviteCode,
+      memberUids: [ALICE_UID],
+      channels: ["general", "memes"],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    aliceDb.collection("server_invites").doc(inviteCode).set({
+      inviteCode: inviteCode,
+      serverId: serverId,
+      serverName: "Original Hub",
+      iconEmoji: "🎮",
+      ownerId: ALICE_UID,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    bobDb.collection("servers").doc(serverId).update({
+      memberUids: [ALICE_UID, BOB_UID],
+      updatedAt: serverTimestamp(),
+    })
+  );
+  await assertSucceeds(
+    charlieDb.collection("servers").doc(serverId).update({
+      memberUids: [ALICE_UID, BOB_UID, CHARLIE_UID],
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  // Neo+ Bob has full server control: rename server, edit channels, create event & server sticker
+  await assertSucceeds(
+    bobDb.collection("servers").doc(serverId).update({
+      name: "Neo Hub Deluxe",
+      channels: ["general"],
+      accentHex: "#F59E0B",
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    bobDb.collection("servers").doc(serverId).collection("events").doc("ev_1").set({
+      serverId: serverId,
+      creatorId: BOB_UID,
+      creatorName: "Bob",
+      title: "Friday Tournament",
+      description: "8K voice & video meetup",
+      scheduledLabel: "Tonight 9 PM",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    bobDb.collection("servers").doc(serverId).collection("custom_stickers").doc("sst_1").set({
+      creatorId: BOB_UID,
+      scopeId: serverId,
+      title: "Squad Crown",
+      emoji: "👑",
+      accentHex: "#22D3EE",
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // Regular member Charlie can list server events & server stickers, but CANNOT create/delete them
+  await assertSucceeds(charlieDb.collection("servers").doc(serverId).collection("events").get());
+  await assertSucceeds(charlieDb.collection("servers").doc(serverId).collection("custom_stickers").get());
+  await assertFails(
+    charlieDb.collection("servers").doc(serverId).collection("events").doc("ev_2").set({
+      serverId: serverId,
+      creatorId: CHARLIE_UID,
+      creatorName: "Charlie",
+      title: "Unauthorized Event",
+      scheduledLabel: "Tomorrow",
+      createdAt: serverTimestamp(),
+    })
+  );
+  await assertFails(
+    charlieDb.collection("servers").doc(serverId).collection("custom_stickers").doc("sst_2").set({
+      creatorId: CHARLIE_UID,
+      scopeId: serverId,
+      title: "Nope",
+      emoji: "😎",
+      accentHex: "#5865F2",
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // 8K Call + WebRTC signals subcollection
+  const callId = "call_8k_rtc";
+  await assertSucceeds(
+    bobDb.collection("calls").doc(callId).set({
+      callerId: BOB_UID,
+      callerName: "Bob",
+      calleeId: ALICE_UID,
+      calleeName: "Alice",
+      participantIds: [BOB_UID, ALICE_UID],
+      targetType: "dm",
+      targetId: `${ALICE_UID}_${BOB_UID}`,
+      callType: "video",
+      status: "active",
+      videoQuality: "8K",
+      callerMuted: false,
+      calleeMuted: false,
+      callerVideoOn: true,
+      calleeVideoOn: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+  );
+
+  await assertSucceeds(
+    bobDb.collection("calls").doc(callId).collection("signals").doc("sig_offer_1").set({
+      callId: callId,
+      senderId: BOB_UID,
+      recipientId: ALICE_UID,
+      participantIds: [BOB_UID, ALICE_UID],
+      type: "offer",
+      sdp: "v=0\r\no=- 123 2 IN IP4 127.0.0.1\r\n",
+      createdAt: serverTimestamp(),
+    })
+  );
+
+  // Alice can query signals addressed to her; Charlie cannot
+  await assertSucceeds(
+    aliceDb.collection("calls").doc(callId).collection("signals")
+      .where("recipientId", "==", ALICE_UID)
+      .get()
+  );
+  await assertFails(
+    charlieDb.collection("calls").doc(callId).collection("signals")
+      .where("recipientId", "==", CHARLIE_UID)
+      .get()
+  );
+});
+

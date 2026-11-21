@@ -160,27 +160,16 @@ fun AppEntranceIntroOverlay(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.padding(horizontal = 32.dp)
         ) {
-            Surface(
-                color = Color(0xFF5865F2),
-                shape = RoundedCornerShape(24.dp),
-                border = BorderStroke(
-                    width = 1.5.dp,
-                    color = Color.White.copy(alpha = 0.30f)
-                ),
-                shadowElevation = 18.dp,
+            val activeLogoVariant = LocalAppLogoVariant.current
+            NeovBrandEmblem(
+                variant = activeLogoVariant,
+                size = 82.dp,
+                cornerRadius = 24.dp,
                 modifier = Modifier
                     .offset(y = logoOffsetY.value.dp)
                     .scale(logoScale.value)
-                    .size(82.dp)
                     .testTag("app_entrance_logo")
-            ) {
-                AsyncImage(
-                    model = R.drawable.neov_icon_fg,
-                    contentDescription = "neov chat n logo",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            )
 
             Spacer(modifier = Modifier.height(22.dp))
 

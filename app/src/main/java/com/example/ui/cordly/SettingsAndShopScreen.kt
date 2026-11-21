@@ -582,10 +582,11 @@ private fun SettingsProfileTab(
                     modifier = Modifier
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { if (hasNeoPlus) onUpdateAppLogo(variant) else onOpenShopForRanks() }
+                        .testTag("app_logo_variant_${variant.storageKey}")
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
-                        Box(modifier = Modifier.size(14.dp).clip(CircleShape).background(variant.badgeColor))
-                        Spacer(modifier = Modifier.width(6.dp))
+                        NeovBrandEmblem(variant = variant, size = 22.dp, cornerRadius = 6.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(if (isArabicLocale) variant.titleAr else variant.titleEn, style = MaterialTheme.typography.labelMedium, color = CordlyTextPrimary)
                     }
                 }

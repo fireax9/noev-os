@@ -50,8 +50,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -595,6 +598,61 @@ fun UserAvatar(
                                     )
                                 }
                             }
+                            FrameShapeStyle.SUKUNA_SHRINE_HANDS -> {
+                                // Domain Expansion: Malevolent Shrine animated fire tongues + dark curse slash ring
+                                val flameColors = listOf(
+                                    Color(0xFFFF4500),
+                                    Color(0xFFEF4444),
+                                    Color(0xFFF59E0B),
+                                    Color(0xFF991B1B),
+                                    Color(0xFFFF6B00)
+                                )
+                                drawCircle(
+                                    color = Color(0xFFDC2626).copy(alpha = 0.28f + 0.24f * pulseScale),
+                                    radius = ringRadius + strokePx * 1.45f,
+                                    style = Stroke(width = strokePx * 1.7f)
+                                )
+                                rotate(rotationAngle * 0.45f) {
+                                    drawCircle(
+                                        brush = Brush.sweepGradient(flameColors),
+                                        radius = ringRadius,
+                                        style = Stroke(width = strokePx * 1.15f)
+                                    )
+                                }
+                                // Flickering animated fire tongues around the entire rim
+                                val tongueCount = 12
+                                for (i in 0 until tongueCount) {
+                                    val baseDeg = i * (360f / tongueCount) + (rotationAngle * 0.28f)
+                                    val ang = baseDeg * PI / 180.0
+                                    val flameLen = strokePx * (1.5f + 0.8f * sin(ang * 3.0 + pulseScale * PI).toFloat())
+                                    val leftAng = (baseDeg - 9f) * PI / 180.0
+                                    val rightAng = (baseDeg + 9f) * PI / 180.0
+                                    val baseL = Offset(
+                                        centerOffset.x + (ringRadius - strokePx * 0.2f) * cos(leftAng).toFloat(),
+                                        centerOffset.y + (ringRadius - strokePx * 0.2f) * sin(leftAng).toFloat()
+                                    )
+                                    val baseR = Offset(
+                                        centerOffset.x + (ringRadius - strokePx * 0.2f) * cos(rightAng).toFloat(),
+                                        centerOffset.y + (ringRadius - strokePx * 0.2f) * sin(rightAng).toFloat()
+                                    )
+                                    val tip = Offset(
+                                        centerOffset.x + (ringRadius + flameLen) * cos(ang).toFloat(),
+                                        centerOffset.y + (ringRadius + flameLen) * sin(ang).toFloat()
+                                    )
+                                    val flamePath = Path().apply {
+                                        moveTo(baseL.x, baseL.y)
+                                        lineTo(tip.x, tip.y)
+                                        lineTo(baseR.x, baseR.y)
+                                        close()
+                                    }
+                                    drawPath(
+                                        path = flamePath,
+                                        color = if (i % 3 == 0) Color(0xFFFDE047).copy(alpha = 0.90f)
+                                        else if (i % 2 == 0) Color(0xFFFF4500).copy(alpha = 0.88f)
+                                        else Color(0xFFDC2626).copy(alpha = 0.86f)
+                                    )
+                                }
+                            }
                         }
                     }
                 } else {
@@ -626,6 +684,93 @@ fun UserAvatar(
                             .clip(CircleShape)
                     )
                 }
+            }
+        }
+        if (frame.shapeStyle == FrameShapeStyle.SUKUNA_SHRINE_HANDS) {
+            // Foreground Malevolent Shrine fire crest + Sukuna Domain Expansion folded hands integrated into the frame
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = this.size.width
+                val h = this.size.height
+                val cx = w * 0.5f
+                val strokePx = frame.strokeDp.dp.toPx()
+
+                // Lower rim blaze enveloping the wrists
+                val blazeBrush = Brush.verticalGradient(
+                    colors = listOf(Color(0xFFFDE047), Color(0xFFFF4500), Color(0xFF991B1B)),
+                    startY = h * 0.64f,
+                    endY = h
+                )
+                drawArc(
+                    brush = blazeBrush,
+                    startAngle = 22f,
+                    sweepAngle = 136f,
+                    useCenter = false,
+                    topLeft = Offset(strokePx * 0.45f, strokePx * 0.45f),
+                    size = Size(w - strokePx * 0.9f, h - strokePx * 0.9f),
+                    style = Stroke(width = strokePx * (1.0f + 0.25f * pulseScale), cap = StrokeCap.Round)
+                )
+
+                // Sukuna Domain Expansion hands (symmetric interlocking steeple mudra at bottom center of frame)
+                val handsY = h * 0.94f
+                val span = w * 0.23f
+                val spireH = h * 0.30f
+                val inkColor = Color(0xFF14090A)
+                val handFill = Color(0xFFFFF5EB)
+                val fireAccent = Color(0xFFFF4500)
+
+                val glowCircleRadius = span * (0.95f + 0.16f * pulseScale)
+                drawCircle(
+                    color = fireAccent.copy(alpha = 0.36f + 0.18f * pulseScale),
+                    radius = glowCircleRadius,
+                    center = Offset(cx, handsY - spireH * 0.38f)
+                )
+
+                // Left hand & raised middle fingers
+                val leftHand = Path().apply {
+                    moveTo(cx - span * 1.15f, handsY)
+                    lineTo(cx - span * 0.56f, handsY - spireH * 0.56f)
+                    lineTo(cx - span * 0.04f, handsY - spireH)
+                    lineTo(cx + span * 0.02f, handsY - spireH * 0.54f)
+                    lineTo(cx - span * 0.28f, handsY - spireH * 0.14f)
+                    lineTo(cx - span * 0.85f, handsY + h * 0.02f)
+                    close()
+                }
+                // Right hand & raised middle fingers
+                val rightHand = Path().apply {
+                    moveTo(cx + span * 1.15f, handsY)
+                    lineTo(cx + span * 0.56f, handsY - spireH * 0.56f)
+                    lineTo(cx + span * 0.04f, handsY - spireH)
+                    lineTo(cx - span * 0.02f, handsY - spireH * 0.54f)
+                    lineTo(cx + span * 0.28f, handsY - spireH * 0.14f)
+                    lineTo(cx + span * 0.85f, handsY + h * 0.02f)
+                    close()
+                }
+
+                drawPath(leftHand, color = handFill)
+                drawPath(rightHand, color = handFill)
+                val inkStroke = Stroke(
+                    width = (w * 0.028f).coerceAtLeast(1.3f),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round
+                )
+                drawPath(leftHand, color = inkColor, style = inkStroke)
+                drawPath(rightHand, color = inkColor, style = inkStroke)
+
+                // Sukuna curse wrist markings (double black bands)
+                drawLine(
+                    color = inkColor,
+                    start = Offset(cx - span * 0.98f, handsY - spireH * 0.12f),
+                    end = Offset(cx - span * 0.62f, handsY - spireH * 0.03f),
+                    strokeWidth = (w * 0.028f).coerceAtLeast(1.3f),
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = inkColor,
+                    start = Offset(cx + span * 0.98f, handsY - spireH * 0.12f),
+                    end = Offset(cx + span * 0.62f, handsY - spireH * 0.03f),
+                    strokeWidth = (w * 0.028f).coerceAtLeast(1.3f),
+                    cap = StrokeCap.Round
+                )
             }
         }
         val artRes = frame.artworkResId
@@ -1164,4 +1309,83 @@ fun RankBadgePill(
         }
     }
 }
+
+val LocalAppLogoVariant = staticCompositionLocalOf { AppLogoVariant.DEFAULT }
+val LocalOnAppLogoVariantSelected = staticCompositionLocalOf<(AppLogoVariant) -> Unit> { {} }
+
+@Composable
+fun NeovBrandEmblem(
+    variant: AppLogoVariant,
+    size: Dp = 32.dp,
+    cornerRadius: Dp = 10.dp,
+    modifier: Modifier = Modifier
+) {
+    val gradientColors = remember(variant) {
+        when (variant) {
+            AppLogoVariant.DEFAULT -> listOf(Color(0xFF5865F2), Color(0xFF404EED), Color(0xFF3139C8))
+            AppLogoVariant.GOLD -> listOf(Color(0xFFFDE047), Color(0xFFF59E0B), Color(0xFFB45309))
+            AppLogoVariant.CRIMSON -> listOf(Color(0xFFF43F5E), Color(0xFFE11D48), Color(0xFF881337))
+            AppLogoVariant.EMERALD -> listOf(Color(0xFF34D399), Color(0xFF10B981), Color(0xFF047857))
+        }
+    }
+    Surface(
+        color = Color.Transparent,
+        shape = RoundedCornerShape(cornerRadius),
+        border = BorderStroke(
+            width = if (size >= 60.dp) 1.5.dp else 1.dp,
+            color = Color.White.copy(alpha = 0.34f)
+        ),
+        shadowElevation = if (size >= 60.dp) 16.dp else 2.dp,
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(cornerRadius))
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Brush.linearGradient(gradientColors))
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = this.size.width
+                val h = this.size.height
+                // Subtle diagonal highlight sheen
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.16f),
+                    radius = w * 0.48f,
+                    center = Offset(w * 0.24f, h * 0.20f)
+                )
+                // Clean modern geometric lowercase 'n' glyph
+                val strokeW = w * 0.175f
+                val leftX = w * 0.31f
+                val rightX = w * 0.69f
+                val topY = h * 0.31f
+                val bottomY = h * 0.72f
+                val archPeakY = h * 0.31f
+
+                val nPath = Path().apply {
+                    moveTo(leftX, bottomY)
+                    lineTo(leftX, topY)
+                    moveTo(leftX, h * 0.45f)
+                    cubicTo(
+                        leftX, archPeakY - h * 0.02f,
+                        rightX, archPeakY - h * 0.02f,
+                        rightX, h * 0.48f
+                    )
+                    lineTo(rightX, bottomY)
+                }
+                drawPath(
+                    path = nPath,
+                    color = Color.White,
+                    style = Stroke(
+                        width = strokeW,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round
+                    )
+                )
+            }
+        }
+    }
+}
+
 

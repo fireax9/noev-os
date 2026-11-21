@@ -34,7 +34,9 @@ import com.example.ui.cordly.AppLanguageManager
 import com.example.ui.cordly.AppThemeMode
 import com.example.ui.cordly.CordlyHomeScreen
 import com.example.ui.cordly.CordlyViewModel
+import com.example.ui.cordly.LocalAppLogoVariant
 import com.example.ui.cordly.LocalAppStrings
+import com.example.ui.cordly.LocalOnAppLogoVariantSelected
 import com.example.ui.cordly.LocalOnLanguageSelected
 import com.example.ui.cordly.LocalSelectedLanguageCode
 import com.example.ui.theme.CordlyTheme
@@ -67,6 +69,9 @@ class MainActivity : ComponentActivity() {
             }
             var selectedAccentColor by remember {
                 mutableStateOf(AppAppearanceStore.loadAccentColor(context))
+            }
+            var selectedLogoVariant by remember {
+                mutableStateOf(AppAppearanceStore.loadLogoVariant(context))
             }
 
             SideEffect {
@@ -102,6 +107,10 @@ class MainActivity : ComponentActivity() {
                 LocalAppAccentColor provides selectedAccentColor,
                 LocalOnAppAccentColorSelected provides { newAccent ->
                     selectedAccentColor = AppAppearanceStore.saveAccentColor(context, newAccent)
+                },
+                LocalAppLogoVariant provides selectedLogoVariant,
+                LocalOnAppLogoVariantSelected provides { variant ->
+                    selectedLogoVariant = AppAppearanceStore.applyAppLogoVariant(context, variant)
                 }
             ) {
                 CordlyTheme(

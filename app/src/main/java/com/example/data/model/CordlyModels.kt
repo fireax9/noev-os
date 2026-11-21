@@ -248,3 +248,44 @@ data class DeveloperTicket(
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
+
+@IgnoreExtraProperties
+data class CallSignal(
+    @DocumentId val id: String = "",
+    val callId: String = "",
+    val senderId: String = "",
+    val recipientId: String = "",
+    val participantIds: List<String> = emptyList(),
+    val type: String = "offer", // "offer" | "answer" | "ice"
+    val sdp: String? = null,
+    val candidate: String? = null,
+    val sdpMid: String? = null,
+    val sdpMLineIndex: Int? = null,
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class ServerEvent(
+    @DocumentId val id: String = "",
+    val serverId: String = "",
+    val creatorId: String = "",
+    val creatorName: String = "",
+    val title: String = "",
+    val description: String? = null,
+    val scheduledLabel: String = "",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+@IgnoreExtraProperties
+data class CustomSticker(
+    @DocumentId val id: String = "",
+    val creatorId: String = "",
+    val scopeId: String? = null,
+    val title: String = "",
+    val emoji: String = "✨",
+    val accentHex: String = "#5865F2",
+    val imageData: String? = null,
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+

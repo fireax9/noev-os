@@ -50,6 +50,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Reply
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddPhotoAlternate
 import androidx.compose.material.icons.rounded.AlternateEmail
 import androidx.compose.material.icons.rounded.Call
@@ -81,6 +82,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -108,6 +110,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import com.example.data.model.CustomSticker
 import com.example.data.repository.CordlyRepository
 import com.example.ui.theme.CordlyAmber
 import com.example.ui.theme.CordlyBlurple
@@ -155,6 +158,9 @@ fun ChatScreen(
     currentUserRank: String = CordlyRepository.RANK_NORMAL,
     compactCards: Boolean = false,
     messagesState: UiState<List<ChatMessageItem>>,
+    customStickers: List<CustomSticker> = emptyList(),
+    canShareServerStickers: Boolean = false,
+    isStickerBusy: Boolean = false,
     hasWallpaper: Boolean = false,
     onBack: () -> Unit,
     onSendMessage: (
@@ -165,6 +171,14 @@ fun ChatScreen(
         mediaDurationMs: Long?
     ) -> Unit,
     onDeleteMessage: (messageId: String, forEveryone: Boolean) -> Unit,
+    onCreateCustomSticker: (
+        title: String,
+        emoji: String,
+        accentHex: String,
+        imageData: String?,
+        shareToServer: Boolean
+    ) -> Unit = { _, _, _, _, _ -> },
+    onDeleteCustomSticker: (CustomSticker) -> Unit = {},
     onUserProfileClick: (userId: String, name: String, photoUrl: String?) -> Unit = { _, _, _ -> },
     onHeaderProfileClick: (() -> Unit)? = null,
     onStartVoiceCall: (() -> Unit)? = null,
@@ -183,12 +197,21 @@ fun ChatScreen(
     var messageText by remember { mutableStateOf("") }
     var replyingTo by remember { mutableStateOf<ChatMessageItem?>(null) }
     var showMediaTray by remember { mutableStateOf(false) }
+    var showCreateStickerDialog by remember { mutableStateOf(false) }
     var mediaTrayTab by remember { mutableIntStateOf(0) } // 0 = Stickers, 1 = GIFs
     var isEncodingPhoto by remember { mutableStateOf(false) }
     var isRecordingAudio by remember { mutableStateOf(false) }
     var recordingDurationMs by remember { mutableLongStateOf(0L) }
     var playingAudioMsgId by remember { mutableStateOf<String?>(null) }
+    var audioPlaybackJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var fullscreenImageSource by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            audioPlaybackJob?.cancel()
+            VoiceNoteHelper.stopPlayback()
+        }
+    }
 
     val listState = rememberLazyListState()
     val isUltraOrPlus = currentUserRank == CordlyRepository.RANK_ULTRA ||
@@ -429,9 +452,14 @@ fun ChatScreen(
                                         if (!audioData.isNullOrBlank()) {
                                             if (playingAudioMsgId == msg.id) {
                                                 playingAudioMsgId = null
+                                                audioPlaybackJob?.cancel()
+                                                audioPlaybackJob = null
+                                                VoiceNoteHelper.stopPlayback()
                                             } else {
+                                                audioPlaybackJob?.cancel()
+                                                VoiceNoteHelper.stopPlayback()
                                                 playingAudioMsgId = msg.id
-                                                scope.launch {
+                                                audioPlaybackJob = scope.launch {
                                                     VoiceNoteHelper.playVoiceClip(audioData) {
                                                         if (playingAudioMsgId == msg.id) {
                                                             playingAudioMsgId = null
@@ -510,10 +538,107 @@ fun ChatScreen(
 
                     if (mediaTrayTab == 0) {
                         LazyVerticalGrid(
-                            columns = GridCells.Adaptive(minSize = 72.dp),
+                            columns = GridCells.Adaptive(minSize = 76.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            item(key = "create_custom_sticker_tile") {
+                                Surface(
+                                    color = CordlyBlurple.copy(alpha = 0.22f),
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.2.dp, CordlyBlurple),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable { showCreateStickerDialog = true }
+                                        .testTag("open_create_sticker_dialog_button")
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center,
+                                        modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Add,
+                                            contentDescription = strings.createStickerTitle,
+                                            tint = CordlyCyan,
+                                            modifier = Modifier.size(26.dp)
+                                        )
+                                        Text(
+                                            text = strings.createStickerButton,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = CordlyTextPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+                            items(customStickers, key = { "custom_${it.id}_${it.scopeId ?: "me"}" }) { custom ->
+                                val customAccent = parseHexColor(custom.accentHex)
+                                Surface(
+                                    color = CordlyCardSurface,
+                                    shape = RoundedCornerShape(14.dp),
+                                    border = BorderStroke(1.2.dp, customAccent.copy(alpha = 0.65f)),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .clickable {
+                                            val payload = CustomStickerCodec.encodeForMessage(custom)
+                                            onSendMessage(custom.title, replyingTo?.text, "sticker", payload, null)
+                                            replyingTo = null
+                                            showMediaTray = false
+                                        }
+                                        .testTag("send_custom_sticker_${custom.id}")
+                                ) {
+                                    Box(modifier = Modifier.fillMaxWidth()) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 8.dp, horizontal = 4.dp)
+                                        ) {
+                                            val img = custom.imageData
+                                            if (!img.isNullOrBlank()) {
+                                                CordlyRemoteOrDataImage(
+                                                    source = img,
+                                                    contentDescription = custom.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier
+                                                        .size(34.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                )
+                                            } else {
+                                                Text(text = custom.emoji, fontSize = 26.sp)
+                                            }
+                                            Text(
+                                                text = custom.title,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (!custom.scopeId.isNullOrBlank()) CordlyAmber else CordlyTextSecondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        if (custom.creatorId == currentUserId || canShareServerStickers) {
+                                            Box(
+                                                contentAlignment = Alignment.Center,
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(2.dp)
+                                                    .size(16.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color.Black.copy(alpha = 0.55f))
+                                                    .clickable { onDeleteCustomSticker(custom) }
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.Close,
+                                                    contentDescription = "Remove sticker",
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             items(PeyShopCatalog.stickers, key = { it.id }) { sticker ->
                                 Surface(
                                     color = CordlyCardSurface,
@@ -873,6 +998,18 @@ fun ChatScreen(
             }
         }
     }
+
+    if (showCreateStickerDialog) {
+        CreateStickerDialog(
+            canShareToServer = canShareServerStickers,
+            isBusy = isStickerBusy,
+            onCreate = { title, emoji, accentHex, imageData, shareToServer ->
+                onCreateCustomSticker(title, emoji, accentHex, imageData, shareToServer)
+                showCreateStickerDialog = false
+            },
+            onDismiss = { showCreateStickerDialog = false }
+        )
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1113,32 +1250,78 @@ private fun DiscordMessageRow(
                                 }
                             }
                             message.messageType == "sticker" -> {
-                                val item = remember(message.mediaData) {
-                                    PeyShopCatalog.findStickerById(message.mediaData)
+                                val decodedCustom = remember(message.mediaData) {
+                                    CustomStickerCodec.decode(message.mediaData)
                                 }
-                                Surface(
-                                    color = (item?.accentColor ?: CordlyAmber).copy(alpha = 0.14f),
-                                    shape = RoundedCornerShape(18.dp),
-                                    border = BorderStroke(
-                                        1.dp,
-                                        (item?.accentColor ?: CordlyAmber).copy(alpha = 0.45f)
-                                    )
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                                    ) {
-                                        Text(
-                                            text = item?.emoji ?: message.text.ifBlank { "✨" },
-                                            fontSize = 48.sp
-                                        )
-                                        if (item != null) {
-                                            Text(
-                                                text = item.titleEn,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = item.accentColor,
-                                                fontWeight = FontWeight.Bold
+                                when (decodedCustom) {
+                                    is DecodedCustomSticker.ImageSticker -> {
+                                        Surface(
+                                            color = CordlyElevatedSurface,
+                                            shape = RoundedCornerShape(18.dp),
+                                            border = BorderStroke(1.2.dp, CordlyBlurple.copy(alpha = 0.55f)),
+                                            modifier = Modifier
+                                                .size(116.dp)
+                                                .clip(RoundedCornerShape(18.dp))
+                                                .clickable { onOpenFullscreenImage(decodedCustom.dataUri) }
+                                        ) {
+                                            CordlyRemoteOrDataImage(
+                                                source = decodedCustom.dataUri,
+                                                contentDescription = message.text.ifBlank { "Custom sticker" },
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier.fillMaxSize()
                                             )
+                                        }
+                                    }
+                                    is DecodedCustomSticker.EmojiSticker -> {
+                                        val customAccent = parseHexColor(decodedCustom.accentHex)
+                                        Surface(
+                                            color = customAccent.copy(alpha = 0.16f),
+                                            shape = RoundedCornerShape(18.dp),
+                                            border = BorderStroke(1.2.dp, customAccent.copy(alpha = 0.55f))
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                            ) {
+                                                Text(text = decodedCustom.emoji, fontSize = 48.sp)
+                                                Text(
+                                                    text = decodedCustom.title,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = customAccent,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    }
+                                    null -> {
+                                        val item = remember(message.mediaData) {
+                                            PeyShopCatalog.findStickerById(message.mediaData)
+                                        }
+                                        Surface(
+                                            color = (item?.accentColor ?: CordlyAmber).copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(18.dp),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                (item?.accentColor ?: CordlyAmber).copy(alpha = 0.45f)
+                                            )
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                            ) {
+                                                Text(
+                                                    text = item?.emoji ?: message.text.ifBlank { "✨" },
+                                                    fontSize = 48.sp
+                                                )
+                                                if (item != null) {
+                                                    Text(
+                                                        text = item.titleEn,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = item.accentColor,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }

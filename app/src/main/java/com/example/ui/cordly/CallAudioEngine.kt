@@ -585,17 +585,47 @@ object VoiceNoteHelper {
         "data:audio/ulaw;base64,$encoded" to totalMs
     }
 
+    private val activeTrackLock = Any()
+    private val playbackGeneration = java.util.concurrent.atomic.AtomicLong(0L)
+
+    @Volatile
+    private var activeTrack: AudioTrack? = null
+
+    fun stopPlayback() {
+        playbackGeneration.incrementAndGet()
+        val trackToStop: AudioTrack? = synchronized(activeTrackLock) {
+            val current = activeTrack
+            activeTrack = null
+            current
+        }
+        if (trackToStop != null) {
+            try {
+                trackToStop.pause()
+                trackToStop.flush()
+                trackToStop.stop()
+            } catch (_: Exception) {
+            }
+            try {
+                trackToStop.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     suspend fun playVoiceClip(mediaData: String, onFinished: () -> Unit) = withContext(Dispatchers.IO) {
+        stopPlayback()
+        val myGeneration = playbackGeneration.incrementAndGet()
+
         val clean = mediaData.substringAfter("base64,", mediaData)
         val ulaw = try {
             Base64.decode(clean, Base64.DEFAULT)
         } catch (_: Exception) {
-            withContext(Dispatchers.Main) { onFinished() }
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { onFinished() }
             return@withContext
         }
         val decoded = CallAudioEngine.decodeMuLaw(ulaw)
         if (decoded.isEmpty()) {
-            withContext(Dispatchers.Main) { onFinished() }
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { onFinished() }
             return@withContext
         }
         val pcm = CallAudioEngine.boostPcmGain(decoded, gain = 1.6f)
@@ -624,25 +654,61 @@ object VoiceNoteHelper {
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
 
+        val registered = synchronized(activeTrackLock) {
+            if (playbackGeneration.get() != myGeneration) {
+                false
+            } else {
+                activeTrack = track
+                true
+            }
+        }
+        if (!registered) {
+            try {
+                track.release()
+            } catch (_: Exception) {
+            }
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) { onFinished() }
+            return@withContext
+        }
+
         try {
             track.setVolume(AudioTrack.getMaxVolume())
             track.play()
             var offset = 0
-            while (offset < pcm.size) {
-                val len = (pcm.size - offset).coerceAtMost(2048)
+            while (isActive && playbackGeneration.get() == myGeneration && offset < pcm.size) {
+                val len = (pcm.size - offset).coerceAtMost(512)
                 val written = track.write(pcm, offset, len)
                 if (written <= 0) break
                 offset += written
             }
-            delay(250L)
+            if (isActive && playbackGeneration.get() == myGeneration) {
+                delay(180L)
+            }
         } catch (_: Exception) {
         } finally {
-            try {
-                track.stop()
-            } catch (_: Exception) {
+            val shouldReleaseHere = synchronized(activeTrackLock) {
+                if (activeTrack === track) {
+                    activeTrack = null
+                    true
+                } else {
+                    false
+                }
             }
-            track.release()
-            withContext(Dispatchers.Main) { onFinished() }
+            if (shouldReleaseHere) {
+                try {
+                    track.pause()
+                    track.flush()
+                    track.stop()
+                } catch (_: Exception) {
+                }
+                try {
+                    track.release()
+                } catch (_: Exception) {
+                }
+            }
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
+                onFinished()
+            }
         }
     }
 }
